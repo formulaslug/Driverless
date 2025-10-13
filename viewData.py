@@ -6,10 +6,10 @@ import numpy as np
 from PIL import Image
 import matplotlib.pyplot as plt
 
-with open('Data/fsoco_segmentation_train/epflrt/ann/amz_00843.png.json') as f:
+with open('Data/fsoco_segmentation_train/epflrt/ann/amz_00825.png.json') as f:
     ann = json.load(f)
 
-img = Image.open('Data/fsoco_segmentation_train/epflrt/img/amz_00843.png')
+img = Image.open('Data/fsoco_segmentation_train/epflrt/img/amz_00825.png')
 fullMask = np.zeros((ann['size']['height'], ann['size']['width']), dtype=np.uint8)
 
 for obj in ann['objects']:
