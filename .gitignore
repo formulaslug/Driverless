@@ -1,2 +1,5 @@
 .DS_Store
-/Data/
+/Data/fsoco_segmentation_train
+/Segmentation/Yolact_minimal
+/SampleData/driverless.mp4
+*.txt
