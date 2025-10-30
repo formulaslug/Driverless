@@ -3,6 +3,7 @@
 ## Active Members
 1. Abishek Adari
 1. Dylan Price
+1.Jaisree D. RaviKumar
 
 ## Design Review Dates/Timeline
 1. Read the paper and PDR  November 3rd
