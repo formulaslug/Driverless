@@ -1,17 +1,16 @@
 from scipy.spatial import Delaunay
 import numpy as np
 import matplotlib.pyplot as plt
-
-def parse_cone_data(cones):
-    # Parses cone data from mapping team to create points to use for triangulation
-
-    return np.array(cones)
     
-    
-def create_delaunay_triangulation(points):
+def create_delaunay_triangulation(cones):
     # Create a Delaunay Triangulation from the cone positions
-
+    points = np.array(cones)
+    
     return Delaunay(points)
+
+def get_midpoint_graph(tri):
+    # Get a midpoint graph from the Delaunay Triangulation
+    return
 
 def visualize_triangulation(points, tri):
     # Visualize and verify triangulation of points
@@ -64,11 +63,11 @@ if __name__ == "__main__":
     random_scatter = [[random.uniform(0, 10), random.uniform(-3, 3)] for _ in range(30)]
 
     # Choose which test data to use
-    test_cone_data = random_scatter# Change this to try different patterns
+    test_cone_data = slalom# Change this to try different patterns
 
     # Parse and create triangulation
-    points = parse_cone_data(test_cone_data)
-    tri = create_delaunay_triangulation(points)
+    points = np.array(test_cone_data)
+    tri = create_delaunay_triangulation(test_cone_data)
 
     # Visualize
     visualize_triangulation(points, tri)
