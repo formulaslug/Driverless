@@ -2,6 +2,7 @@
 
 ## Active Members
 1. Ray Zou
+2. Nathan Margolis
 
 ## Design Review Dates/Timeline
 1. PDR November 3rd
