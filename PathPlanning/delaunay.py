@@ -8,17 +8,32 @@ def create_delaunay_triangulation(cones):
     
     return Delaunay(points)
 
-def get_midpoint_graph(tri):
+def get_midpoint_graph(tri, points):
     # Get a midpoint graph from the Delaunay Triangulation
-    return
+    waypoints = []
+    
+    for simplex in tri.simplices:
+        i, j ,k = simplex
+        # Get coordinates of each point
+        p1 = points[i]
+        p2 = points[j]
+        p3 = points[k]
+        
+        # Compute midpoints of each edge and add to waypoints
+        waypoints.append((p1 + p2) / 2)
+        waypoints.append((p1 + p3) / 2)
+        waypoints.append((p2 + p3) / 2)
+       
+    return np.array(waypoints)
 
-def visualize_triangulation(points, tri):
+def visualize_triangulation(points, tri, waypoints):
     # Visualize and verify triangulation of points
 
     plt.figure(figsize=(10,8))
     
     plt.triplot(points[ : , 0], points[ : , 1], tri.simplices, 'b-', linewidth=0.5)
     plt.plot(points[ : , 0], points[ : , 1], 'ro', markersize=10, label="Cones")
+    plt.plot(waypoints[ : , 0], waypoints[ : , 1], 'go', markersize=10, label="Waypoints")
     
     plt.xlabel('X position')
     plt.ylabel('Y position')
@@ -63,11 +78,12 @@ if __name__ == "__main__":
     random_scatter = [[random.uniform(0, 10), random.uniform(-3, 3)] for _ in range(30)]
 
     # Choose which test data to use
-    test_cone_data = slalom# Change this to try different patterns
+    test_cone_data = oval_track# Change this to try different patterns
 
     # Parse and create triangulation
     points = np.array(test_cone_data)
     tri = create_delaunay_triangulation(test_cone_data)
+    waypoints = get_midpoint_graph(tri, points)
 
     # Visualize
-    visualize_triangulation(points, tri)
+    visualize_triangulation(points, tri, waypoints)
