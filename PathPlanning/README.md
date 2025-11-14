@@ -289,7 +289,7 @@ ql = 0.5      # Path length deviation weight
 
 ## Team
 
-- Nathan Yee (Lead)
+- Nathan Yee
 - Suhani Agarwal
 - Aedan Benavides
 
