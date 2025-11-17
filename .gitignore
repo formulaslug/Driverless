@@ -1,5 +1,7 @@
 .DS_Store
 /Data/fsoco_segmentation_train
 /Segmentation/Yolact_minimal
+/DepthEstimation/TestData
+/DepthEstimation/Lite-Mono
 /SampleData/driverless.mp4
 *.txt
