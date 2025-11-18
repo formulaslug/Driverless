@@ -3,5 +3,8 @@
 /Segmentation/Yolact_minimal
 /DepthEstimation/TestData
 /DepthEstimation/Lite-Mono
+/DepthEstimation/output
+/DepthEstimation/output_best
+/DepthEstimation/weights
 /SampleData/driverless.mp4
 *.txt
