@@ -116,7 +116,7 @@ dependencies:
   - pygame=2.6.1
   - pyparsing=3.1.2
   - pysocks=1.7.1
-  - python=3.10.9
+  - python=3.12.2
   - python-dateutil=2.9.0post0
   - python-tzdata=2023.3
   - python_abi=3.12
@@ -236,4 +236,4 @@ dependencies:
       - watchfiles==1.1.0
       - websockets==13.1
       - zstd==1.5.7.2
-prefix: /Users/username/anaconda3/envs/fsae
+prefix: /Users/daniel/anaconda3/envs/fsae
