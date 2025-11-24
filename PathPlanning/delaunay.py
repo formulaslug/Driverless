@@ -40,79 +40,39 @@ def get_midpoints(cones):
         
     return waypoints, waypoint_graph, tri
 
-def visualize_triangulation(points, tri, waypoints):
-    # Visualize and verify triangulation of points
+def visualize(test_cases):
+    # Visualize one or more tracks with triangulation and waypoint graph
+    # test_cases: list of (name, cone_data) tuples
 
-    plt.figure(figsize=(10,8))
+    n = len(test_cases)
+    cols = min(n, 3)
+    rows = (n + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(6*cols, 5*rows), squeeze=False)
+    axes = axes.flatten()
 
-    plt.triplot(points[ : , 0], points[ : , 1], tri.simplices, 'b-', linewidth=0.5)
-    plt.plot(points[ : , 0], points[ : , 1], 'ro', markersize=10, label="Cones")
-    plt.plot(waypoints[ : , 0], waypoints[ : , 1], 'go', markersize=10, label="Waypoints")
+    for i, (name, cone_data) in enumerate(test_cases):
+        ax = axes[i]
+        points = np.array(cone_data)
+        waypoints, waypoint_graph, tri = get_midpoints(cone_data)
 
-    plt.xlabel('X position')
-    plt.ylabel('Y position')
-    plt.title('Delaunay Triangulation of Cones')
-    plt.legend()
-    plt.show()
+        # Plot triangulation and cones
+        ax.triplot(points[:, 0], points[:, 1], tri.simplices, 'b-', linewidth=0.5)
+        ax.plot(points[:, 0], points[:, 1], 'ro', markersize=6, label="Cones")
+        ax.plot(waypoints[:, 0], waypoints[:, 1], 'go', markersize=4, label="Waypoints")
 
-def visualize_waypoint_graph(waypoint_graph, points):
-    # Visualize the waypoint graph connections in a separate window
+        # Draw waypoint graph connections
+        for wp, neighbors in waypoint_graph.items():
+            for neighbor in neighbors:
+                ax.plot([wp[0], neighbor[0]], [wp[1], neighbor[1]], 'g-', linewidth=0.8, alpha=0.4)
 
-    plt.figure(figsize=(10,8))
+        ax.set_title(f'{name} ({len(points)} cones)')
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.3)
+        ax.set_aspect('equal', adjustable='box')
 
-    # Draw all connections between waypoints
-    for waypoint, neighbors in waypoint_graph.items():
-        wx, wy = waypoint
-        for neighbor in neighbors:
-            nx, ny = neighbor
-            # Draw line between connected waypoints
-            plt.plot([wx, nx], [wy, ny], 'g-', linewidth=1, alpha=0.6)
-
-    # Plot waypoints as nodes
-    waypoint_coords = np.array(list(waypoint_graph.keys()))
-    plt.plot(waypoint_coords[:, 0], waypoint_coords[:, 1], 'go',
-             markersize=8, label="Waypoints", zorder=3)
-
-    plt.xlabel('X position')
-    plt.ylabel('Y position')
-    plt.title('Waypoint Graph Connections')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.show()
-
-def visualize_combined(points, tri, waypoints, waypoint_graph):
-    # Visualize both triangulation and waypoint graph side-by-side
-
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 8))
-
-    # Left plot: Delaunay Triangulation
-    ax1.triplot(points[:, 0], points[:, 1], tri.simplices, 'b-', linewidth=0.5)
-    ax1.plot(points[:, 0], points[:, 1], 'ro', markersize=10, label="Cones")
-    ax1.plot(waypoints[:, 0], waypoints[:, 1], 'go', markersize=10, label="Waypoints")
-    ax1.set_xlabel('X position')
-    ax1.set_ylabel('Y position')
-    ax1.set_title('Delaunay Triangulation of Cones')
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
-
-    # Right plot: Waypoint Graph
-    # Draw all connections between waypoints
-    for waypoint, neighbors in waypoint_graph.items():
-        wx, wy = waypoint
-        for neighbor in neighbors:
-            nx, ny = neighbor
-            ax2.plot([wx, nx], [wy, ny], 'g-', linewidth=1, alpha=0.6)
-
-    # Plot waypoints as nodes
-    waypoint_coords = np.array(list(waypoint_graph.keys()))
-    ax2.plot(waypoint_coords[:, 0], waypoint_coords[:, 1], 'go',
-             markersize=8, label="Waypoints", zorder=3)
-
-    ax2.set_xlabel('X position')
-    ax2.set_ylabel('Y position')
-    ax2.set_title('Waypoint Graph Connections')
-    ax2.legend()
-    ax2.grid(True, alpha=0.3)
+    # Hide unused subplots
+    for j in range(n, len(axes)):
+        axes[j].set_visible(False)
 
     plt.tight_layout()
     plt.show()
@@ -155,10 +115,10 @@ if __name__ == "__main__":
 
     # Choose which test data to use
     test_cases = [
+          ("Random 30", random_scatter),
           ("Simple Track", simple_track),
           ("Slalom", slalom),
           ("Grid", grid),
-          ("Random 30", random_scatter),
           ("Oval Track", oval_track)
       ]
 
@@ -171,5 +131,5 @@ if __name__ == "__main__":
 
           print(f"{name:15} | Cones: {len(points):3} | Time: {elapsed*1000:6.2f} ms | Hz: {1/elapsed:6.1f}")
 
-    # Visualize the last test case - both plots side-by-side
-    visualize_combined(points, tri, waypoints, waypoint_graph)
+    # Visualize all test tracks
+    visualize(test_cases)
