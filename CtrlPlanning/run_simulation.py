@@ -107,12 +107,14 @@ def simple_dynamics(x, y, yaw, v, delta, throttle, brake, dt=0.05):
     return x, y, yaw, v
 
 
-def run(short=True, hud_mode: str = 'inset', autoscale: bool = True, num_steps: int | None = None):
+def run(short=True, hud_mode: str = 'inset', autoscale: bool = True, num_steps: int | None = None,
+    seed: int | None = 42, debug: bool = False):
     # choose path: generate a random path (short or long)
+    # pass through `seed` so runs can be deterministic when desired
     if short:
-        path = generate_random_path(num_points=300, max_turn_deg=120.0, seed=42)
+        path = generate_random_path(num_points=300, max_turn_deg=120.0, seed=seed)
     else:
-        path = generate_random_path(num_points=3000, max_turn_deg=120.0, seed=42)
+        path = generate_random_path(num_points=3000, max_turn_deg=120.0, seed=seed)
 
     controller = StanleyController(
         k_e=1.0,
@@ -201,6 +203,9 @@ def run(short=True, hud_mode: str = 'inset', autoscale: bool = True, num_steps: 
             path_xy=local_path,
             v_ref=v_ref
         )
+
+        if debug:
+            print(f"step={step} delta={delta:.4f} throttle={throttle:.3f} brake={brake:.3f} v={v:.3f}")
 
         # update HUD bars so user can see steering/throttle/brake
         if hud_mode == 'separate' and hud is not None:
@@ -333,4 +338,4 @@ def run(short=True, hud_mode: str = 'inset', autoscale: bool = True, num_steps: 
 
 if __name__ == '__main__':
     # run indefinitely by default when executed directly
-    run(short=True, hud_mode='inset', autoscale=True, num_steps=None)
+    run(short=True, hud_mode='inset', autoscale=True, num_steps=None, seed=43, debug=True)
