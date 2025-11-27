@@ -13,4 +13,4 @@ from path_smoother import PathSmoother
 import config
 
 def test() :
-    return
+    return 1
