@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+from typing import Union, Tuple
 
 project_root = Path(__file__).resolve().parent / 'YOLO'
 sys.path.insert(0, str(project_root))
@@ -9,6 +10,25 @@ from yolo import Config
 from yolo.tools.solver import TrainModel
 from lightning import Trainer
 from yolo.utils.logging_utils import setup, set_seed
+
+
+def parseDeviceConfig(deviceConfig: Union[int, str, list]) -> Tuple[str, Union[int, str, list]]:
+    if isinstance(deviceConfig, str):
+        if deviceConfig.lower() == 'cpu':
+            return 'cpu', 1
+        elif deviceConfig.lower() == 'auto':
+            return 'auto', 'auto'
+        elif deviceConfig.lower() == 'cuda':
+            return 'cuda', 'auto'
+        else:
+            return 'gpu', int(deviceConfig)
+    elif isinstance(deviceConfig, int):
+        return 'gpu', [deviceConfig]
+    elif isinstance(deviceConfig, list):
+        return 'gpu', deviceConfig
+    else:
+        return 'auto', 'auto'
+
 
 @hydra.main(config_path="YOLO/yolo/config", config_name="config", version_base=None)
 def train(cfg: Config):
@@ -38,9 +58,11 @@ def train(cfg: Config):
 
     loggers = []
 
+    accelerator, devices = parseDeviceConfig(cfg.device)
+
     trainer = Trainer(
-        accelerator='auto',
-        devices='auto',
+        accelerator=accelerator,
+        devices=devices,
         max_epochs=cfg.task.epoch,
         precision='16-mixed',
         callbacks=callbacks,
