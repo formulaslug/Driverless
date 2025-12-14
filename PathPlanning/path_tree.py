@@ -74,6 +74,22 @@ def visualize_paths(paths, cones, vehicle_pos, vehicle_heading, max_paths=None):
     cones = np.array(cones)
     vehicle_pos = np.array(vehicle_pos)
 
+    # Get all possible waypoints from Delaunay triangulation
+    waypoints, _, _ = get_midpoints(cones)
+
+    # Filter to only forward-facing waypoints (±90° arc)
+    vectors = waypoints - vehicle_pos
+    angles = np.arctan2(vectors[:, 1], vectors[:, 0])
+    angle_diff = angles - vehicle_heading
+    angle_diff = np.arctan2(np.sin(angle_diff), np.cos(angle_diff))
+    forward_mask = np.abs(angle_diff) < (np.pi / 2)
+    masked_waypoints = waypoints[forward_mask]
+
+    # Plot only masked waypoints (small but visible)
+    plt.scatter(masked_waypoints[:, 0], masked_waypoints[:, 1], c='lightgray', s=30,
+                marker='o', edgecolors='gray', linewidth=0.5,
+                label='Available Waypoints', zorder=2, alpha=0.7)
+
     # Plot cones
     plt.scatter(cones[:, 0], cones[:, 1], c='red', s=150,
                 marker='o', edgecolors='darkred', linewidth=2,
@@ -168,7 +184,7 @@ if __name__ == "__main__":
         vehicle_pos=vehicle_pos,
         vehicle_heading=vehicle_heading,
         max_depth=4,
-        k_start=3
+        k_start=2
     )
 
-    visualize_paths(paths, oval_track, vehicle_pos, vehicle_heading, max_paths=1)
+    visualize_paths(paths, oval_track, vehicle_pos, vehicle_heading, max_paths=10)
