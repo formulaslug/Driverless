@@ -29,6 +29,9 @@ def getCameraIntrinsics(width, height, fx=None, fy=None, cx=None, cy=None, fov=N
     elif fov is None:
         fov = GOPRO_PRESETS[DEFAULT_GOPRO_MODE]['fov']
 
+    if fov <= 0 or fov >= 180:
+        raise ValueError(f"Invalid FOV {fov}: must be between 0 and 180 degrees")
+
     if fx is None or fy is None:
         focalLength = width / (2 * np.tan(np.radians(fov) / 2))
         fx = fy = focalLength
@@ -41,13 +44,18 @@ def getCameraIntrinsics(width, height, fx=None, fy=None, cx=None, cy=None, fov=N
     return {'fx': fx, 'fy': fy, 'cx': cx, 'cy': cy, 'fov': fov}
 
 def loadExclusionAreas(jsonPath):
-    with open(jsonPath, 'r') as f:
-        exclusions = json.load(f)
+    try:
+        with open(jsonPath, 'r') as f:
+            exclusions = json.load(f)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Exclusion areas file not found: {jsonPath}")
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in exclusion areas file {jsonPath}: {e}")
     return exclusions
 
 def estimateGroundPlane(depthMap, cameraIntrinsics, exclusionAreas=None, subsampleStep=5,
                         inlierThreshold=0.1, maxTrials=100, maxTiltAngle=45,
-                        depthScale=10.0):
+                        depthScale=10.0, maxDepth=100.0):
     metricDepth = convertDisparityToDepth(depthMap, depthScale)
 
     H, W = metricDepth.shape
@@ -73,7 +81,7 @@ def estimateGroundPlane(depthMap, cameraIntrinsics, exclusionAreas=None, subsamp
             if isInExclusionArea(u, v, exclusionAreas):
                 continue
             d = metricDepth[v, u]
-            if d > 0 and np.isfinite(d) and d < 100:
+            if d > 0 and np.isfinite(d) and d < maxDepth:
                 x = (u - cx) * d / fx
                 y = (v - cy) * d / fy
                 z = d
@@ -104,6 +112,8 @@ def estimateGroundPlane(depthMap, cameraIntrinsics, exclusionAreas=None, subsamp
     d = ransac.estimator_.intercept_
 
     norm = np.sqrt(a**2 + b**2 + c**2)
+    if norm == 0:
+        return None, 0.0, None
     planeParams = np.array([a, b, c, -d]) / norm
 
     normal = planeParams[:3]
@@ -120,14 +130,14 @@ def estimateGroundPlane(depthMap, cameraIntrinsics, exclusionAreas=None, subsamp
 
     return planeParams, inlierRatio, fullInlierMask
 
-def generatePlaneGrid(planeParams, cameraIntrinsics, depthMap, gridSpacing=2.0, depthScale=10.0):
+def generatePlaneGrid(planeParams, cameraIntrinsics, depthMap, gridSpacing=2.0, depthScale=10.0, maxDepth=100.0):
     a, b, c, d = planeParams
 
     if abs(b) < 1e-6:
         return [], 0, 0
 
     metricDepth = convertDisparityToDepth(depthMap, depthScale)
-    validDepths = metricDepth[(metricDepth > 0) & (metricDepth < 100)]
+    validDepths = metricDepth[(metricDepth > 0) & (metricDepth < maxDepth)]
     if len(validDepths) == 0:
         return [], 0, 0
 
@@ -182,7 +192,10 @@ def createVisualization(depthMap, inlierMask, planeParams, inlierRatio, original
     depthNorm = (depthMap - depthMin) / (depthMax - depthMin + 1e-8) * 255.0
     depthNorm = depthNorm.astype(np.uint8)
 
-    cmap = matplotlib.colormaps.get_cmap('Spectral_r')
+    try:
+        cmap = matplotlib.colormaps.get_cmap('Spectral_r')
+    except (KeyError, AttributeError):
+        cmap = matplotlib.colormaps.get_cmap('viridis')
     depthVis = (cmap(depthNorm)[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
 
     barWidth = 30
@@ -305,11 +318,14 @@ def processDepthFile(depthPath, outputDir, cameraIntrinsics, args):
     if frameMatch and os.path.exists(args.video):
         frameNum = int(frameMatch.group(1))
         cap = cv2.VideoCapture(args.video)
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frameNum)
-        ret, originalFrame = cap.read()
-        cap.release()
-        if ret and originalFrame is not None:
-            originalFrame = cv2.resize(originalFrame, (depthMap.shape[1], depthMap.shape[0]))
+        if cap.isOpened():
+            totalFrames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            if frameNum < totalFrames:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frameNum)
+                ret, originalFrame = cap.read()
+                if ret and originalFrame is not None:
+                    originalFrame = cv2.resize(originalFrame, (depthMap.shape[1], depthMap.shape[0]))
+            cap.release()
 
     planeOutputPath = os.path.join(outputDir, f"{basename}_plane.npy")
     np.save(planeOutputPath, planeParams)

@@ -2,6 +2,7 @@ import os
 import sys
 import cv2
 import numpy as np
+import argparse
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.append(os.path.join(os.path.dirname(__file__)))
@@ -101,26 +102,27 @@ class TestHelper:
 
         print("="*60)
 
-    def runSingleFrameTest(self):
-        print("Initializing models...")
-        depthEstimator = DepthEstimator()
-        coneSegmentor = ConeSegmentor()
-        distEstimator = DistanceEstimator()
-
+    def runSingleFrameTest(self, debug=False):
         print(f"Loading test image from {self.imagePath}...")
         image = self.loadTestImage()
 
         if image is None:
             return
 
+        H, W = image.shape[:2]
+        cameraIntrinsics = getCameraIntrinsics(W, H, fov=90)
+        cameraIntrinsics['depthScale'] = 10.0
+
+        print("Initializing models...")
+        depthEstimator = DepthEstimator()
+        coneSegmentor = ConeSegmentor()
+        distEstimator = DistanceEstimator(cameraIntrinsics=cameraIntrinsics)
+
         print("Running depth estimation...")
         depthMap = depthEstimator.estimateDepth(image)
 
         print("Running cone segmentation...")
         segResults = coneSegmentor.segment(image)
-
-        H, W = image.shape[:2]
-        cameraIntrinsics = getCameraIntrinsics(W, H, fov=90)
 
         print("Estimating ground plane...")
         planeParams, inlierRatio, inlierMask = estimateGroundPlane(
@@ -133,6 +135,9 @@ class TestHelper:
             maxTiltAngle=45,
             depthScale=10.0
         )
+
+        if planeParams is None:
+            print("Warning: Ground plane estimation failed, proceeding without plane-based distance")
 
         print("Estimating cone distances...")
         coneDistances = distEstimator.estimateAllCones(
@@ -162,11 +167,16 @@ class TestHelper:
         outputPath = os.path.join(outputDir, 'test_visualization.png')
         self.saveVisualization(visualization, outputPath)
 
-        self.displayFourTile(visualization)
+        if not debug:
+            self.displayFourTile(visualization)
 
 def quickTest():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--debug', action='store_true', help='Run without opening display window')
+    args = parser.parse_args()
+
     helper = TestHelper()
-    helper.runSingleFrameTest()
+    helper.runSingleFrameTest(debug=args.debug)
 
 if __name__ == '__main__':
     quickTest()

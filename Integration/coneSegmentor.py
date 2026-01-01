@@ -31,7 +31,10 @@ class ConeSegmentor:
             self.device = device
 
         self.confThreshold = confThreshold
-        self.model = YOLO(weightsPath)
+        try:
+            self.model = YOLO(weightsPath)
+        except Exception as e:
+            raise RuntimeError(f"Failed to load YOLO model from {weightsPath}: {e}")
 
     def segment(self, image):
         if not isinstance(image, np.ndarray):
@@ -48,8 +51,6 @@ class ConeSegmentor:
             verbose=False
         )
 
-        result = results[0]
-
         output = {
             'masks': None,
             'boxes': None,
@@ -57,6 +58,11 @@ class ConeSegmentor:
             'confidences': None,
             'numDetections': 0
         }
+
+        if len(results) == 0:
+            return output
+
+        result = results[0]
 
         if result.masks is not None:
             numDetections = len(result.masks)
