@@ -1,7 +1,13 @@
 import numpy as np
 from scipy.interpolate import splprep, splev
+from typing import Tuple
 
-def smooth_path(waypoints, num_points=100):
+def smooth_path(waypoints: np.ndarray, num_points: int = 100) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Smooth discrete waypoints using cubic spline interpolation.
+
+    Returns smoothed path coordinates and curvature array.
+    """
     # u: parameter values of original waypoints
     #    that measure how far along the path each waypoint is
     #    given as a normalized value [0,1]

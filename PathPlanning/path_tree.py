@@ -1,9 +1,14 @@
 import numpy as np
+from numpy.typing import ArrayLike
 from delaunay import get_midpoints
+from typing import List, Tuple
 
-# Need vehicle_heading in RADIANS from localization
-# Find k nearest waypoints in the forward arc (±90°) of the vehicle
-def find_nearest_waypoints(vehicle_pos, vehicle_heading, waypoints, k):
+def find_nearest_waypoints(vehicle_pos: ArrayLike, vehicle_heading: float, waypoints: np.ndarray, k: int) -> List[Tuple[float, float]]:
+    """
+    Find k nearest waypoints in the forward arc (±90°) of the vehicle.
+
+    vehicle_heading must be in RADIANS.
+    """
     # compute vector from vehicle position to each waypoint
     vectors = waypoints - vehicle_pos
     
@@ -26,8 +31,12 @@ def find_nearest_waypoints(vehicle_pos, vehicle_heading, waypoints, k):
     k_waypoints = masked_waypoints[k_indices]
     return [tuple(np.round(wp, decimals=6)) for wp in k_waypoints]
 
-# Generate path tree from cone positions (main API function)
-def get_path_tree(cones, vehicle_pos, vehicle_heading, max_depth, k_start):
+def get_path_tree(cones: ArrayLike, vehicle_pos: ArrayLike, vehicle_heading: float, max_depth: int, k_start: int) -> List[List[Tuple[float, float]]]:
+    """
+    Generate breadth-first tree of possible paths through waypoint graph.
+
+    Returns list of paths, where each path is a list of waypoint tuples.
+    """
     # get the possible waypoints
     waypoints, waypoint_graph, tri = get_midpoints(cones)
 

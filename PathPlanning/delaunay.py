@@ -1,9 +1,15 @@
 from scipy.spatial import Delaunay
 from collections import defaultdict
 import numpy as np
-    
-def get_midpoints(cones):
-    # Get a midpoint graph from the Delaunay Triangulation
+from numpy.typing import ArrayLike
+from typing import Tuple, Dict, Set
+
+def get_midpoints(cones: ArrayLike) -> Tuple[np.ndarray, Dict[Tuple[float, float], Set[Tuple[float, float]]], Delaunay]:
+    """
+    Generate waypoint graph from cone positions using Delaunay triangulation.
+
+    Returns waypoints (midpoints of triangle edges), adjacency graph, and triangulation.
+    """
     points = np.array(cones)    
     tri = Delaunay(points)
     waypoint_graph = defaultdict(set)
