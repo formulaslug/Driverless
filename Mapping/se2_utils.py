@@ -62,4 +62,3 @@ def invert_se2(T: np.ndarray) -> np.ndarray:
     T_inv[0:2, 0:2] = R_inv #Set the top-left 2x2 part to the inverse rotation
     T_inv[0:2, 2] = t_inv #Set the top-right 2x1 part to the inverse translation
     return T_inv
-
