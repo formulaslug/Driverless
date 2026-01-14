@@ -8,11 +8,11 @@ Run these in Jetson terminal:
 ## Step 2: Check Status
 `systemctl status ssh`
 
-## Step 3: Check IP Adress
+## Step 3: Check IP address
 Run:
 `hostname -I`
 
-Use first IP adress given from command
+Use first IP address given from command
 
 ## Step 4: SSH from your Laptop
 Run the following from your laptop:
@@ -25,4 +25,5 @@ Replace {jetson-ip} with the IP you got from step 3
 
 ## Step 5: Exit Command
 type:
+
 `exit` or ctrl+d
