@@ -1,6 +1,8 @@
 import numpy as np
 from numpy.typing import ArrayLike
 from delaunay import get_midpoints
+from beam_search import beam_search_prune
+import config as cfg
 from typing import List, Tuple
 
 def is_forward(waypoint: ArrayLike, vehicle_pos: ArrayLike, vehicle_heading: float) -> bool:
@@ -65,7 +67,9 @@ def get_path_tree(cones: ArrayLike, colors: ArrayLike, vehicle_pos: ArrayLike, v
                     next_level.append(path + [next_wp])
                     
         # we should prune here and cut the list down
+        if len(next_level) > cfg.BEAM_WIDTH:
+            next_level = beam_search_prune(next_level, cones, colors, cfg.BEAM_WIDTH)
         current_level = next_level
     
-    # here we should be selecting and returning the best path
+    # return current list of paths
     return current_level

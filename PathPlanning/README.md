@@ -7,7 +7,7 @@ Real-time path planning for UCSC FSAE driverless racing at **25 Hz (40ms cycle t
 
 ## Status (Jan 2026)
 
-**Progress**: 4/5 phases complete (80%) | Performance: Well within 40ms budget
+**✅ COMPLETE** - All 5 phases implemented and integrated
 
 | Phase | Status | File |
 |-------|--------|------|
@@ -15,7 +15,7 @@ Real-time path planning for UCSC FSAE driverless racing at **25 Hz (40ms cycle t
 | 2. Path Tree Population | ✅ COMPLETE | `path_tree.py` |
 | 3. Cost Functions | ✅ COMPLETE | `cost_functions.py` |
 | 4. Path Smoothing | ✅ COMPLETE | `path_smoother.py` |
-| 5. Beam Search + Integration | 🚧 IN PROGRESS | `beam_search.py`, `path_planner.py` |
+| 5. Beam Search + Integration | ✅ COMPLETE | `beam_search.py`, `main.py` |
 
 ## How It Works
 
@@ -29,24 +29,23 @@ SLAM → Delaunay Triangulation → Path Tree → Cost Evaluation → Beam Searc
 | Module | Function | Description |
 |--------|----------|-------------|
 | `delaunay.py` | `get_midpoints(cones, colors)` | Generates waypoint graph using Delaunay triangulation. Only creates waypoints between blue-yellow cone pairs (track boundaries). |
-| `path_tree.py` | `get_path_tree(cones, colors, vehicle_pos, heading, depth, k)` | Breadth-first search through waypoint graph. Forward-arc filtering (±90°) and cycle prevention. |
+| `path_tree.py` | `get_path_tree(cones, colors, vehicle_pos, heading, depth, k)` | Breadth-first search through waypoint graph. Forward-arc filtering (±90°), cycle prevention, and level-by-level beam search pruning. |
 | `cost_functions.py` | `evaluate_path_cost(path, cones, colors)` | 7-metric AMZ cost function: angle sharpness, smoothness, spacing, width variance, color confidence, length, boundary violations. |
 | `path_smoother.py` | `smooth_path(waypoints, num_points)` | Cubic spline interpolation. Returns smooth coordinates + curvature array. |
-| `beam_search.py` | `beam_search_prune(tree, beam_width, cost_fn)` | **TODO**: Prune path tree to top-k lowest cost paths. |
-| `path_planner.py` | `plan_path(cones, colors, vehicle_pos, heading)` | **TODO**: End-to-end integration of all phases. |
+| `beam_search.py` | `beam_search_prune(paths, cones, colors, beam_width)` | Prune path list to top-k lowest cost paths. |
+| `main.py` | `plan_path(cones, colors, vehicle_pos, heading)` | **Main API** - End-to-end pipeline integrating all phases. Returns smooth path + curvature. |
 
 ## Testing
 
 ```bash
 PathPlanning/tests/
-  ├── test_delaunay.py           # ✅ Visualization for straight/curved/hairpin/chicane tracks
-  ├── test_path_tree.py          # ✅ Path generation, forward-arc filtering
-  ├── test_cost_functions.py     # ✅ Cost evaluation on realistic tracks (straight/curved/hairpin/slalom/spare cones)
-  ├── test_beam_search.py        # ⏳ TODO - Pruning algorithm
-  └── test_path_planner.py       # ⏳ TODO - End-to-end integration
+  ├── test_delaunay.py           # ✅ Delaunay triangulation with visualization
+  ├── test_path_tree.py          # ✅ Path tree generation, forward-arc filtering
+  ├── test_cost_functions.py     # ✅ Cost evaluation on realistic tracks
+  └── test_main.py               # ✅ End-to-end pipeline with full visualizations
 ```
 
-Run tests: `cd tests && python test_<module>.py`
+Run tests: `cd tests && python test_main.py`
 
 ## Data Interfaces
 
@@ -59,12 +58,37 @@ Run tests: `cd tests && python test_<module>.py`
 - Curvature array: np.ndarray (n_points,)
 - Path quality/confidence metric
 
+## Usage
+
+```python
+from main import plan_path
+import numpy as np
+
+# Input from SLAM (cone positions and color probabilities)
+cones = np.array([[5, 2], [10, 2], [15, 2], ...])
+colors = np.array([[1, 0, 0, 0], [0, 1, 0, 0], ...])  # blue, yellow, orange_small, orange_large
+
+# Vehicle state
+vehicle_pos = np.array([0, 0])
+vehicle_heading = 0.0  # radians
+
+# Run path planner
+smooth_path, curvature = plan_path(cones, colors, vehicle_pos, vehicle_heading)
+
+if smooth_path is not None:
+    # Send to Control Planning team
+    print(f"Path shape: {smooth_path.shape}")  # (100, 2)
+    print(f"Curvature shape: {curvature.shape}")  # (100,)
+else:
+    print("No valid path found")
+```
+
 ## Next Steps
 
-1. **Implement `beam_search.py`** - Prune path tree to top-k paths per level
-2. **Complete `path_planner.py`** - Integrate all phases into single API
-3. **Performance profiling** - Must achieve <40ms on Raspberry Pi
-4. **Cost function tuning** - Adjust weights in `config.py` based on real track data
+1. **Performance profiling** - Measure execution time on Raspberry Pi (target: <40ms)
+2. **Real-world testing** - Test with actual SLAM cone detections
+3. **Cost function tuning** - Adjust weights in `config.py` based on track data
+4. **Integration** - Connect to SLAM and Control Planning modules
 
 ## Dependencies
 
