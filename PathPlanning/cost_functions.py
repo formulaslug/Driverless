@@ -11,7 +11,7 @@ import numpy as np
 import config as cfg
 from scipy.spatial.distance import pdist, squareform
 
-TARGET_PATH_LENGTH = 12.0   # desired horizon
+TARGET_PATH_LENGTH = 15.0   # desired horizon
 BIG_COST = 1e9
 
 def assign_cones_to_segments(path, cones):
@@ -240,12 +240,12 @@ def evaluate_path_cost(path, cones, colors=None):
 
 # total cost (AMZ formula with tunable weights)
     cost = (
-        1.5 * norm_angle           # qc: penalize sharp turns
-        + 0.5 * norm_smoothness    # curve smoothness
+        2.5 * norm_angle           # qc: penalize sharp turns
+        + 1.5 * norm_smoothness    # curve smoothness
         + 1.0 * norm_spacing       # qs: cone spacing consistency
-        + 1.0 * norm_trackwidth    # qw: track width consistency (AMZ metric!)
-        + 1.0 * norm_color         # qcolor: color confidence
-        + 1.0 * norm_length        # ql: path length deviation
-        + 5.0 * boundary_violation_metric  # high penalty for wrong side (not normalized, already 0-1)
+        + 5 * norm_trackwidth    # qw: track width consistency (AMZ metric!)
+        + 2 * norm_color         # qcolor: color confidence
+        + 1 * norm_length        # ql: path length deviation
+        + 10 * boundary_violation_metric  # high penalty for wrong side (not normalized, already 0-1)
     )
     return float(cost)

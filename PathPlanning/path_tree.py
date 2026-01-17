@@ -39,14 +39,14 @@ def find_nearest_waypoints(vehicle_pos: ArrayLike, vehicle_heading: float, waypo
     k_waypoints = masked_waypoints[k_indices]
     return [tuple(np.round(wp, decimals=6)) for wp in k_waypoints]
 
-def get_path_tree(cones: ArrayLike, vehicle_pos: ArrayLike, vehicle_heading: float, max_depth: int, k_start: int) -> List[List[Tuple[float, float]]]:
+def get_path_tree(cones: ArrayLike, colors: ArrayLike, vehicle_pos: ArrayLike, vehicle_heading: float, max_depth: int, k_start: int) -> List[List[Tuple[float, float]]]:
     """
     Generate breadth-first tree of possible paths through waypoint graph.
 
     Returns list of paths, where each path is a list of waypoint tuples.
     """
     # get the possible waypoints
-    waypoints, waypoint_graph, tri = get_midpoints(cones)
+    waypoints, waypoint_graph, tri = get_midpoints(cones, colors)
 
     # get the k nearest waypoints
     starting_waypoints = find_nearest_waypoints(vehicle_pos, vehicle_heading, waypoints, k_start)
