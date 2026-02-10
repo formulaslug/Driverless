@@ -1,14 +1,3 @@
-"""
-Simple demo tests (DO NOT TOUCH teammate tests)
-
-Per track:
-- build hardcoded cones (blue/yellow) with small stagger so Delaunay forms blue-yellow edges
-- run get_path_tree -> candidate paths
-- prune top 5 using beam_search_prune
-- compute costs for each of top 5
-- SHOW matplotlib plot with cones + top paths
-"""
-
 import os
 import sys
 import numpy as np
@@ -25,9 +14,7 @@ from cost_functions import evaluate_path_cost
 import matplotlib.pyplot as plt
 
 
-# -----------------------------
 # Colors helper
-# -----------------------------
 def _colors_for(cones, blue_mask):
     colors = np.zeros((len(cones), 4), dtype=float)
     colors[blue_mask, cfg.CONE_COLOR_BLUE] = 0.95
@@ -38,10 +25,6 @@ def _colors_for(cones, blue_mask):
     return colors
 
 
-# -----------------------------
-# Track builder that WORKS with your Delaunay midpoint rule
-# Key: STAGGER x + small y jitter so triangles include BLUE+YELLOW
-# -----------------------------
 def _make_corridor(xs, center_y_fn, width=3.2, x_stagger=0.35, y_jitter=0.18):
     """
     xs: array of x positions
@@ -72,9 +55,7 @@ def _make_corridor(xs, center_y_fn, width=3.2, x_stagger=0.35, y_jitter=0.18):
     return cones, colors
 
 
-# -----------------------------
 # 4 Demo Tracks (simple but "Delaunay-friendly")
-# -----------------------------
 def make_track_straight():
     xs = np.linspace(0, 28, 16)
     return _make_corridor(xs, center_y_fn=lambda x: 0.0)
@@ -100,10 +81,6 @@ def make_track_chicane():
 
 
 def make_track_hairpin_like():
-    """
-    Not a true U-turn (your algorithm can't go backwards in x),
-    but a strong "hook" that still moves forward in +x so the tree can keep expanding.
-    """
     xs = np.linspace(0, 32, 22)
 
     def center(x):
@@ -116,9 +93,7 @@ def make_track_hairpin_like():
     return _make_corridor(xs, center_y_fn=center)
 
 
-# -----------------------------
 # Plotting
-# -----------------------------
 def _plot_top_paths(cones, colors, vehicle_pos, vehicle_heading, paths, costs, title):
     labels = np.argmax(colors, axis=1)
     blue_mask = labels == cfg.CONE_COLOR_BLUE
@@ -149,10 +124,7 @@ def _plot_top_paths(cones, colors, vehicle_pos, vehicle_heading, paths, costs, t
     plt.show()
     plt.close(fig)
 
-
-# -----------------------------
 # Demo runner
-# -----------------------------
 def _run_demo_track(track_name, cones, colors, vehicle_pos, vehicle_heading, max_depth=30, k_start=3, top_k=5):
     candidate_paths = get_path_tree(cones, colors, vehicle_pos, vehicle_heading, max_depth, k_start)
 
@@ -177,9 +149,7 @@ def _run_demo_track(track_name, cones, colors, vehicle_pos, vehicle_heading, max
     return candidate_paths, top_paths, top_costs
 
 
-# -----------------------------
 # Pytest
-# -----------------------------
 @pytest.mark.parametrize("name,track_fn", [
     ("straight", make_track_straight),
     ("gentle_s", make_track_gentle_s),
