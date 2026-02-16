@@ -34,8 +34,7 @@ class ConeFilter:
         self.cones = []
 
     def transformConeLocations(self, dx, dy, dyaw):
-        cosYaw = np.cos(-d
-                            yaw)
+        cosYaw = np.cos(-dyaw)
         sinYaw = np.sin(-dyaw)
 
         for cone in self.cones:
@@ -44,6 +43,71 @@ class ConeFilter:
 
             cone.x = xRot - dx
             cone.y = yRot - dy
+
+    def getDominantClass(self, colorConfidences):
+        maxConf = max(colorConfidences)
+        if maxConf < 0.5:
+            return -1
+        return colorConfidences.index(maxConf)
+
+    def areColorsCompatible(self, colorConf1, colorConf2):
+        class1 = self.getDominantClass(colorConf1)
+        class2 = self.getDominantClass(colorConf2)
+
+        if class1 == -1 or class2 == -1:
+            return True
+
+        if class1 == class2:
+            return True
+
+        if (class1 == 2 and class2 == 3) or (class1 == 3 and class2 == 2):
+            return True
+
+        return False
+
+    def matchDetections(self, detections):
+        matches = []
+        unmatchedDetections = []
+
+        usedCones = set()
+
+        for detection in detections:
+            x, y, blueConf, yellowConf, sOrangeConf, lOrangeConf = detection
+            colorConfidences = [blueConf, yellowConf, sOrangeConf, lOrangeConf]
+
+            bestCone = None
+            bestDistance = float('inf')
+
+            for i, cone in enumerate(self.cones):
+                if i in usedCones:
+                    continue
+
+                if not self.areColorsCompatible(colorConfidences, cone.colorConfidences):
+                    continue
+
+                dx = x - cone.x
+                dy = y - cone.y
+                distance = np.sqrt(dx*dx + dy*dy)
+
+                if distance < self.matchThreshold and distance < bestDistance:
+                    bestDistance = distance
+                    bestCone = i
+
+            if bestCone is not None:
+                matches.append((bestCone, detection))
+                usedCones.add(bestCone)
+            else:
+                unmatchedDetections.append(detection)
+
+        return matches, unmatchedDetections
+
+    def mergeConeWithDetection(self, cone, detection):
+        x, y, blueConf, yellowConf, sOrangeConf, lOrangeConf = detection
+
+        cone.x = (cone.x + x) / 2
+        cone.y = (cone.y + y) / 2
+        cone.age = 0
+        cone.numObservations += 1
 
     def addNewCones(self, detections):
         for detection in detections:
@@ -55,7 +119,17 @@ class ConeFilter:
     def update(self, detections, dx, dy, dyaw):
         self.transformConeLocations(dx, dy, dyaw)
 
-        self.addNewCones(detections)
+        for cone in self.cones:
+            cone.age += 1
+
+        matches, unmatchedDetections = self.matchDetections(detections)
+
+        for coneIdx, detection in matches:
+            self.mergeConeWithDetection(self.cones[coneIdx], detection)
+
+        self.addNewCones(unmatchedDetections)
+
+        self.cones = [cone for cone in self.cones if cone.age <= self.maxAge]
 
     def getConeMap(self):
         return [(cone.x, cone.y, *cone.colorConfidences) for cone in self.cones]
