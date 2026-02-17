@@ -18,18 +18,22 @@ class ConeFilter:
                  yMovementUncertainty=0.05,
                  deltaYawUncertainty=0.02,
                  initialVariance=0.25,
+                 measurementVariance=0.25,
                  matchThreshold=1.0,
                  mahalanobisThreshold=3.0,
                  colorMatchThreshold=0.2,
-                 maxAge=10):
+                 maxAge=10,
+                 useMahalanobis=True):
         self.xMovementUncertainty = xMovementUncertainty
         self.yMovementUncertainty = yMovementUncertainty
         self.deltaYawUncertainty = deltaYawUncertainty
         self.initialVariance = initialVariance
+        self.measurementVariance = measurementVariance
         self.matchThreshold = matchThreshold
         self.mahalanobisThreshold = mahalanobisThreshold
         self.colorMatchThreshold = colorMatchThreshold
         self.maxAge = maxAge
+        self.useMahalanobis = useMahalanobis
 
         self.cones = []
 
@@ -37,12 +41,31 @@ class ConeFilter:
         cosYaw = np.cos(-dyaw)
         sinYaw = np.sin(-dyaw)
 
+        J = np.array([[cosYaw, -sinYaw],
+                      [sinYaw, cosYaw]])
+
         for cone in self.cones:
             xRot = cone.x * cosYaw - cone.y * sinYaw
             yRot = cone.x * sinYaw + cone.y * cosYaw
 
             cone.x = xRot - dx
             cone.y = yRot - dy
+
+            covOld = np.array([[cone.varX, 0],
+                              [0, cone.varY]])
+
+            covRotated = J @ covOld @ J.T
+
+            dist = np.sqrt(cone.x**2 + cone.y**2)
+            yawUncertaintyContribution = (dist * self.deltaYawUncertainty)**2
+
+            Q = np.array([[self.xMovementUncertainty**2 + yawUncertaintyContribution, 0],
+                         [0, self.yMovementUncertainty**2 + yawUncertaintyContribution]])
+
+            covNew = covRotated + Q
+
+            cone.varX = covNew[0, 0]
+            cone.varY = covNew[1, 1]
 
     def getDominantClass(self, colorConfidences):
         maxConf = max(colorConfidences)
@@ -87,9 +110,17 @@ class ConeFilter:
 
                 dx = x - cone.x
                 dy = y - cone.y
-                distance = np.sqrt(dx*dx + dy*dy)
 
-                if distance < self.matchThreshold and distance < bestDistance:
+                if self.useMahalanobis:
+                    totalVarX = cone.varX + self.measurementVariance
+                    totalVarY = cone.varY + self.measurementVariance
+                    distance = np.sqrt(dx**2 / totalVarX + dy**2 / totalVarY)
+                    threshold = self.mahalanobisThreshold
+                else:
+                    distance = np.sqrt(dx**2 + dy**2)
+                    threshold = self.matchThreshold
+
+                if distance < threshold and distance < bestDistance:
                     bestDistance = distance
                     bestCone = i
 
@@ -104,8 +135,15 @@ class ConeFilter:
     def mergeConeWithDetection(self, cone, detection):
         x, y, blueConf, yellowConf, sOrangeConf, lOrangeConf = detection
 
-        cone.x = (cone.x + x) / 2
-        cone.y = (cone.y + y) / 2
+        Kx = cone.varX / (cone.varX + self.measurementVariance)
+        Ky = cone.varY / (cone.varY + self.measurementVariance)
+
+        cone.x = cone.x + Kx * (x - cone.x)
+        cone.y = cone.y + Ky * (y - cone.y)
+
+        cone.varX = (1 - Kx) * cone.varX
+        cone.varY = (1 - Ky) * cone.varY
+
         cone.age = 0
         cone.numObservations += 1
 
