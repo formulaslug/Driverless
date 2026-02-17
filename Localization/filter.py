@@ -1,13 +1,14 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
+from scipy.optimize import linear_sum_assignment
 
 class Cone:
     def __init__(self, x, y, colorConfidences, initialVariance=0.25):
         self.x = x
         self.y = y
-        self.varX = initialVariance
-        self.varY = initialVariance
+        self.cov = np.array([[initialVariance, 0.0],
+                             [0.0, initialVariance]])
         self.colorConfidences = colorConfidences
         self.age = 0
         self.numObservations = 1
@@ -38,34 +39,51 @@ class ConeFilter:
         self.cones = []
 
     def transformConeLocations(self, dx, dy, dyaw):
+        # p_new = R(-dyaw) @ (p_old - [dx, dy])
         cosYaw = np.cos(-dyaw)
         sinYaw = np.sin(-dyaw)
 
         J = np.array([[cosYaw, -sinYaw],
                       [sinYaw, cosYaw]])
 
+        dxRot = dx * cosYaw - dy * sinYaw
+        dyRot = dx * sinYaw + dy * cosYaw
+
         for cone in self.cones:
             xRot = cone.x * cosYaw - cone.y * sinYaw
             yRot = cone.x * sinYaw + cone.y * cosYaw
 
-            cone.x = xRot - dx
-            cone.y = yRot - dy
+            cone.x = xRot - dxRot
+            cone.y = yRot - dyRot
 
-            covOld = np.array([[cone.varX, 0],
-                              [0, cone.varY]])
+            covRotated = J @ cone.cov @ J.T
 
-            covRotated = J @ covOld @ J.T
-
+            # Yaw uncertainty applied only in tangential direction
             dist = np.sqrt(cone.x**2 + cone.y**2)
-            yawUncertaintyContribution = (dist * self.deltaYawUncertainty)**2
+            if dist > 1e-6:
+                angle = np.arctan2(cone.y, cone.x)
+                tangentX = -np.sin(angle)
+                tangentY = np.cos(angle)
+                tangent = np.array([[tangentX], [tangentY]])
+                Qyaw = (dist * self.deltaYawUncertainty)**2 * (tangent @ tangent.T)
+            else:
+                Qyaw = np.zeros((2, 2))
 
-            Q = np.array([[self.xMovementUncertainty**2 + yawUncertaintyContribution, 0],
-                         [0, self.yMovementUncertainty**2 + yawUncertaintyContribution]])
+            Q = np.array([[self.xMovementUncertainty**2, 0.0],
+                         [0.0, self.yMovementUncertainty**2]]) + Qyaw
 
-            covNew = covRotated + Q
+            cone.cov = covRotated + Q
 
-            cone.varX = covNew[0, 0]
-            cone.varY = covNew[1, 1]
+    def normalizeColorConfidences(self, colorConfidences):
+        total = sum(colorConfidences)
+        if total > 0:
+            return [c / total for c in colorConfidences]
+        else:
+            return [1.0 / len(colorConfidences)] * len(colorConfidences)
+
+    def colorConfidenceSimilarity(self, colorConf1, colorConf2):
+        dotProduct = sum(c1 * c2 for c1, c2 in zip(colorConf1, colorConf2))
+        return dotProduct
 
     def getDominantClass(self, colorConfidences):
         maxConf = max(colorConfidences)
@@ -74,6 +92,11 @@ class ConeFilter:
         return colorConfidences.index(maxConf)
 
     def areColorsCompatible(self, colorConf1, colorConf2):
+        similarity = self.colorConfidenceSimilarity(colorConf1, colorConf2)
+
+        if similarity >= self.colorMatchThreshold:
+            return True
+
         class1 = self.getDominantClass(colorConf1)
         class2 = self.getDominantClass(colorConf2)
 
@@ -89,60 +112,73 @@ class ConeFilter:
         return False
 
     def matchDetections(self, detections):
-        matches = []
-        unmatchedDetections = []
+        if len(detections) == 0 or len(self.cones) == 0:
+            return [], list(detections)
 
-        usedCones = set()
+        R = np.eye(2) * self.measurementVariance
 
-        for detection in detections:
+        # Build cost matrix: rows=detections, cols=cones
+        numDetections = len(detections)
+        numCones = len(self.cones)
+        sentinel = 1e9
+        costMatrix = np.full((numDetections, numCones), sentinel)
+
+        for di, detection in enumerate(detections):
             x, y, blueConf, yellowConf, sOrangeConf, lOrangeConf = detection
             colorConfidences = [blueConf, yellowConf, sOrangeConf, lOrangeConf]
 
-            bestCone = None
-            bestDistance = float('inf')
-
-            for i, cone in enumerate(self.cones):
-                if i in usedCones:
-                    continue
-
+            for ci, cone in enumerate(self.cones):
                 if not self.areColorsCompatible(colorConfidences, cone.colorConfidences):
                     continue
 
-                dx = x - cone.x
-                dy = y - cone.y
+                delta = np.array([x - cone.x, y - cone.y])
 
                 if self.useMahalanobis:
-                    totalVarX = cone.varX + self.measurementVariance
-                    totalVarY = cone.varY + self.measurementVariance
-                    distance = np.sqrt(dx**2 / totalVarX + dy**2 / totalVarY)
+                    S = cone.cov + R
+                    Sinv = np.linalg.inv(S)
+                    distance = np.sqrt(delta @ Sinv @ delta)
                     threshold = self.mahalanobisThreshold
                 else:
-                    distance = np.sqrt(dx**2 + dy**2)
+                    distance = np.sqrt(delta @ delta)
                     threshold = self.matchThreshold
 
-                if distance < threshold and distance < bestDistance:
-                    bestDistance = distance
-                    bestCone = i
+                if distance < threshold:
+                    costMatrix[di, ci] = distance
 
-            if bestCone is not None:
-                matches.append((bestCone, detection))
-                usedCones.add(bestCone)
-            else:
-                unmatchedDetections.append(detection)
+        rowInds, colInds = linear_sum_assignment(costMatrix)
+
+        matches = []
+        matchedDetectionInds = set()
+        for ri, ci in zip(rowInds, colInds):
+            if costMatrix[ri, ci] < sentinel:
+                matches.append((ci, detections[ri]))
+                matchedDetectionInds.add(ri)
+
+        unmatchedDetections = [detections[i] for i in range(numDetections) if i not in matchedDetectionInds]
 
         return matches, unmatchedDetections
 
     def mergeConeWithDetection(self, cone, detection):
         x, y, blueConf, yellowConf, sOrangeConf, lOrangeConf = detection
+        newColorConfidences = self.normalizeColorConfidences([blueConf, yellowConf, sOrangeConf, lOrangeConf])
 
-        Kx = cone.varX / (cone.varX + self.measurementVariance)
-        Ky = cone.varY / (cone.varY + self.measurementVariance)
+        R = np.eye(2) * self.measurementVariance
+        S = cone.cov + R
+        K = cone.cov @ np.linalg.inv(S)
 
-        cone.x = cone.x + Kx * (x - cone.x)
-        cone.y = cone.y + Ky * (y - cone.y)
+        innovation = np.array([x - cone.x, y - cone.y])
+        update = K @ innovation
+        cone.x += update[0]
+        cone.y += update[1]
 
-        cone.varX = (1 - Kx) * cone.varX
-        cone.varY = (1 - Ky) * cone.varY
+        cone.cov = (np.eye(2) - K) @ cone.cov
+
+        alpha = 1.0 / (cone.numObservations + 1)
+        fusedConfidences = [
+            (1 - alpha) * cone.colorConfidences[i] + alpha * newColorConfidences[i]
+            for i in range(len(cone.colorConfidences))
+        ]
+        cone.colorConfidences = self.normalizeColorConfidences(fusedConfidences)
 
         cone.age = 0
         cone.numObservations += 1
@@ -150,7 +186,7 @@ class ConeFilter:
     def addNewCones(self, detections):
         for detection in detections:
             x, y, blueConf, yellowConf, sOrangeConf, lOrangeConf = detection
-            colorConfidences = [blueConf, yellowConf, sOrangeConf, lOrangeConf]
+            colorConfidences = self.normalizeColorConfidences([blueConf, yellowConf, sOrangeConf, lOrangeConf])
             newCone = Cone(x, y, colorConfidences, self.initialVariance)
             self.cones.append(newCone)
 
@@ -196,11 +232,15 @@ class ConeFilter:
 
             ax.scatter(cone.x, cone.y, c=color, s=100, zorder=5, edgecolors='black', linewidths=1)
 
-            ellipseWidth = 2 * np.sqrt(cone.varX)
-            ellipseHeight = 2 * np.sqrt(cone.varY)
+            # Extract ellipse angle from full covariance
+            eigvals, eigvecs = np.linalg.eigh(cone.cov)
+            angle = np.degrees(np.arctan2(eigvecs[1, 1], eigvecs[0, 1]))
+            ellipseWidth = 2 * np.sqrt(eigvals[1])
+            ellipseHeight = 2 * np.sqrt(eigvals[0])
             ellipse = Ellipse((cone.x, cone.y),
                             width=ellipseWidth,
                             height=ellipseHeight,
+                            angle=angle,
                             facecolor='none',
                             edgecolor=color,
                             alpha=0.5,
