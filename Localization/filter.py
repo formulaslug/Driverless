@@ -131,5 +131,71 @@ class ConeFilter:
 
         self.cones = [cone for cone in self.cones if cone.age <= self.maxAge]
 
+    def visualize(self, savePath=None, showPlot=True):
+        fig, ax = plt.subplots(figsize=(10, 10))
+
+        coneColors = {
+            0: '#0000FF',
+            1: '#FFD700',
+            2: '#FF8C00',
+            3: '#FF4500',
+        }
+
+        vehicleSize = 0.5
+        vehicleTriangle = plt.Polygon([
+            [vehicleSize, 0],
+            [0, vehicleSize * 0.4],
+            [0, -vehicleSize * 0.4]
+        ], color='red', fill=True, zorder=10)
+        ax.add_patch(vehicleTriangle)
+
+        for cone in self.cones:
+            dominantClass = self.getDominantClass(cone.colorConfidences)
+            if dominantClass == -1:
+                color = '#808080'
+            else:
+                color = coneColors[dominantClass]
+
+            ax.scatter(cone.x, cone.y, c=color, s=100, zorder=5, edgecolors='black', linewidths=1)
+
+            ellipseWidth = 2 * np.sqrt(cone.varX)
+            ellipseHeight = 2 * np.sqrt(cone.varY)
+            ellipse = Ellipse((cone.x, cone.y),
+                            width=ellipseWidth,
+                            height=ellipseHeight,
+                            facecolor='none',
+                            edgecolor=color,
+                            alpha=0.5,
+                            linewidth=1.5)
+            ax.add_patch(ellipse)
+
+        ax.grid(True, alpha=0.3)
+        ax.set_xlabel('Forward Distance (m)', fontsize=12)
+        ax.set_ylabel('Lateral Distance (m)', fontsize=12)
+        ax.set_title('Cone Map (Vehicle Frame)', fontsize=14, fontweight='bold')
+        ax.set_aspect('equal')
+
+        if len(self.cones) > 0:
+            xCoords = [c.x for c in self.cones]
+            yCoords = [c.y for c in self.cones]
+            margin = 2.0
+            xMin = min(xCoords + [0]) - margin
+            xMax = max(xCoords + [vehicleSize]) + margin
+            yMin = min(yCoords + [-vehicleSize * 0.4]) - margin
+            yMax = max(yCoords + [vehicleSize * 0.4]) + margin
+            ax.set_xlim(xMin, xMax)
+            ax.set_ylim(yMin, yMax)
+        else:
+            ax.set_xlim(-2, 20)
+            ax.set_ylim(-10, 10)
+
+        if savePath is not None:
+            plt.savefig(savePath, dpi=150, bbox_inches='tight')
+
+        if showPlot:
+            plt.show()
+        else:
+            plt.close()
+
     def getConeMap(self):
         return [(cone.x, cone.y, *cone.colorConfidences) for cone in self.cones]
