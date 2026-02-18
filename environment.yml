@@ -235,5 +235,7 @@ dependencies:
       - varname==0.15.0
       - watchfiles==1.1.0
       - websockets==13.1
+      - gpxpy==1.6.2
+      - pytest==8.3.4
       - zstd==1.5.7.2
 prefix: /Users/username/anaconda3/envs/fsae
