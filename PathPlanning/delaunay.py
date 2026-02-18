@@ -84,7 +84,10 @@ def get_midpoints(cones: ArrayLike, colors) -> Tuple[np.ndarray, Dict[Tuple[floa
                 waypoint_graph[wp2].add(wp1)
 
     # stack all the waypoint arrays into one vertically
-    waypoints = np.vstack([valid_wayp1p2, valid_wayp1p3, valid_wayp2p3])
+    parts = [a for a in [valid_wayp1p2, valid_wayp1p3, valid_wayp2p3] if len(a) > 0]
+    if not parts:
+        return np.empty((0, 2)), dict(), tri
+    waypoints = np.vstack(parts)
     waypoints = np.unique(waypoints, axis=0)
-        
+
     return waypoints, waypoint_graph, tri

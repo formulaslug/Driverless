@@ -8,15 +8,17 @@ import config as cfg
 
 def plan_path(
     cones: ArrayLike,
+    coordinate_confidence: ArrayLike,
     colors: ArrayLike,
     vehicle_pos: ArrayLike,
     vehicle_heading: float
 ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
     """
-    Complete path planning pipeline for autonomous racing.
+    Complete path planning pipeline
 
     Args:
         cones: Cone positions (n_cones, 2) - [x, y] in vehicle frame
+        coordinate_confidence: Positional uncertainty radius per cone (n_cones,) in meters
         colors: Cone color probabilities (n_cones, 4) - [blue, yellow, orange_small, orange_large]
         vehicle_pos: Vehicle position [x, y]
         vehicle_heading: Vehicle heading in radians
@@ -26,18 +28,24 @@ def plan_path(
             - smooth_path: np.ndarray (n_points, 2) or None if no path found
             - curvature: np.ndarray (n_points,) or None if no path found
     """
+    if len(cones) < cfg.MIN_CONES_FOR_VALID_PATH:
+        return None, None
+    
     # generate all possible paths with level-by-level beam search pruning
-    candidate_paths = get_path_tree(
-        cones, colors, vehicle_pos, vehicle_heading,
-        cfg.MAX_TREE_DEPTH, cfg.K_START
-    )
+    try:
+        candidate_paths = get_path_tree(
+            cones, coordinate_confidence, colors, vehicle_pos, vehicle_heading,
+            cfg.MAX_TREE_DEPTH, cfg.K_START
+        )
+    except Exception:
+        return None, None
 
     # handle no paths found
     if len(candidate_paths) == 0:
         return None, None
 
     # select best path from candidates
-    best_paths = beam_search_prune(candidate_paths, cones, colors, beam_width=1)
+    best_paths = beam_search_prune(candidate_paths, cones, coordinate_confidence, colors, beam_width=1)
 
     if len(best_paths) == 0:
         return None, None

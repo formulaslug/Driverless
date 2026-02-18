@@ -5,6 +5,7 @@ from cost_functions import evaluate_path_cost
 def beam_search_prune(
     paths: List[List[Tuple[float, float]]],
     cones: np.ndarray,
+    coordinate_confidence:np.ndarray,
     colors: np.ndarray,
     beam_width: int
 ) -> List[List[Tuple[float, float]]]:
@@ -18,7 +19,7 @@ def beam_search_prune(
     # evaluate cost for each path
     path_costs = []
     for path in paths:
-        cost = evaluate_path_cost(np.array(path), cones, colors)
+        cost = evaluate_path_cost(np.array(path), cones, coordinate_confidence, colors)
         path_costs.append((path, cost))
 
     # sort by cost (lowest = best)

@@ -1,11 +1,5 @@
-import os
-import sys
 import numpy as np
 import pytest
-
-# Ensure imports work when running from PathPlanning/tests
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 import config as cfg
 from path_tree import get_path_tree
 from beam_search import beam_search_prune
@@ -25,7 +19,7 @@ def _colors_for(cones, blue_mask):
     return colors
 
 
-def _make_corridor(xs, center_y_fn, width=3.2, x_stagger=0.35, y_jitter=0.18):
+def _make_corridor(xs, center_y_fn, width=3.2, noise_std=0.00):
     """
     xs: array of x positions
     center_y_fn: function mapping x -> center_y
@@ -35,23 +29,17 @@ def _make_corridor(xs, center_y_fn, width=3.2, x_stagger=0.35, y_jitter=0.18):
     cones = []
     blue_mask = []
 
-    for i, x in enumerate(xs):
+    for x in xs:
         c = float(center_y_fn(x))
 
-        # alternating jitter + alternating x stagger on yellow
-        jit = y_jitter if (i % 2 == 0) else -y_jitter
-        x_yellow = x + (x_stagger if (i % 2 == 0) else -x_stagger)
-
-        # blue cone
-        cones.append([x, c + width/2 + jit])
+        cones.append([x, c + width / 2])
         blue_mask.append(True)
 
-        # yellow cone
-        cones.append([x_yellow, c - width/2 - jit])
+        cones.append([x, c - width / 2])
         blue_mask.append(False)
 
     cones = np.array(cones, dtype=float)
-    colors = _colors_for(cones, np.array(blue_mask, dtype=bool))
+    colors = _colors_for(cones, np.array(blue_mask))
     return cones, colors
 
 
@@ -106,7 +94,7 @@ def _plot_top_paths(cones, colors, vehicle_pos, vehicle_heading, paths, costs, t
     ax.scatter(vehicle_pos[0], vehicle_pos[1], s=140, marker="s", label="Vehicle")
     ax.arrow(vehicle_pos[0], vehicle_pos[1],
              1.4*np.cos(vehicle_heading), 1.4*np.sin(vehicle_heading),
-             head_width=0.35)
+             head_width=0.3)
 
     path_colors = ["tab:red", "tab:orange", "tab:green", "tab:purple", "tab:brown"]
 
@@ -122,19 +110,19 @@ def _plot_top_paths(cones, colors, vehicle_pos, vehicle_heading, paths, costs, t
     ax.legend(loc="best", fontsize=9)
 
     plt.show()
-    plt.close(fig)
 
 # Demo runner
-def _run_demo_track(track_name, cones, colors, vehicle_pos, vehicle_heading, max_depth=30, k_start=3, top_k=5):
-    candidate_paths = get_path_tree(cones, colors, vehicle_pos, vehicle_heading, max_depth, k_start)
+def _run_demo_track(track_name, cones, colors, vehicle_pos, vehicle_heading, max_depth=20, k_start=3, top_k=5):
+    coordinate_confidence = np.zeros(len(cones))
+    candidate_paths = get_path_tree(cones, coordinate_confidence, colors, vehicle_pos, vehicle_heading, max_depth, k_start)
 
     if len(candidate_paths) == 0:
         print(f"\n--- {track_name} ---")
         print("NO candidates generated.")
         return candidate_paths, [], []
 
-    top_paths = beam_search_prune(candidate_paths, cones, colors, beam_width=top_k)
-    top_costs = [evaluate_path_cost(np.array(p), cones, colors) for p in top_paths]
+    top_paths = beam_search_prune(candidate_paths, cones, coordinate_confidence, colors, beam_width=top_k)
+    top_costs = [evaluate_path_cost(np.array(p), cones, coordinate_confidence, colors) for p in top_paths]
 
     order = np.argsort(top_costs)
     top_paths = [top_paths[i] for i in order]
@@ -158,6 +146,7 @@ def _run_demo_track(track_name, cones, colors, vehicle_pos, vehicle_heading, max
 ])
 def test_demo_tracks_generate_and_plot(name, track_fn):
     cones, colors = track_fn()
+    coordinate_confidence = np.zeros(len(cones))
 
     vehicle_pos = np.array([-1.0, 0.0], dtype=float)
     vehicle_heading = 0.0

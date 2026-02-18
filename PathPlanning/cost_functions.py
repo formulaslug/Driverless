@@ -165,14 +165,14 @@ def calculate_trackwidth_variance(path, cones, colors):
     return float(np.var(widths))
 
 
-def evaluate_path_cost(path, cones, colors=None):
+def evaluate_path_cost(path, cones, coordinate_confidence, colors=None):
     path = np.asarray(path, float)
     cones = np.asarray(cones, float)
 
     if len(path) < 2 or len(cones) < cfg.MIN_CONES_FOR_VALID_PATH:
         return BIG_COST
 
-# angle + curve metric
+    # angle + curve metric
     segs = path[1:] - path[:-1]
     headings = np.arctan2(segs[:, 1], segs[:, 0])
 
@@ -185,7 +185,7 @@ def evaluate_path_cost(path, cones, colors=None):
         angle_metric = 0.0
         smoothness_metric = 0.0
 
-# cone spacing metric (using scipy for efficiency)
+    # cone spacing metric (using scipy for efficiency)
     if len(cones) > 1:
         # Compute pairwise distances efficiently
         dist_matrix = squareform(pdist(cones))  # shape: (n_cones, n_cones)
@@ -197,7 +197,7 @@ def evaluate_path_cost(path, cones, colors=None):
     else:
         spacing_metric = 0.0
 
-# color metric
+    # color metric
     color_metric = 0.0
     if colors is not None:
         colors = np.asarray(colors, float)
@@ -206,22 +206,49 @@ def evaluate_path_cost(path, cones, colors=None):
             wrong_p = 1.0 - p_best           # chance of being wrong
             color_metric = float(np.mean(wrong_p)**2)
 
-# length metric
+    # length metric
     seg_lengths = np.linalg.norm(segs, axis=1)
     total_length = float(np.sum(seg_lengths))
     length_metric = (total_length - TARGET_PATH_LENGTH) ** 2
 
-# track width variance metric
+    # track width variance metric
     if colors is not None:
         trackwidth_metric = calculate_trackwidth_variance(path, cones, colors)
     else:
         trackwidth_metric = 0.0
 
-# track boundary metric
+    # track boundary metric
     if colors is not None:
         boundary_violation_metric = calculate_boundary_violation(path, cones, colors)
     else:
         boundary_violation_metric = 0.0
+        
+    # coordinate confidence metric — penalize paths near positionally uncertain cones
+    coord_conf_metric = 0.0
+    if coordinate_confidence is not None:
+        coordinate_confidence = np.asarray(coordinate_confidence, float)
+        if len(coordinate_confidence) == len(cones):
+            # compute minimum distance from each cone to any path segment
+            n_segments = len(path) - 1
+            min_cone_dist = np.full(len(cones), np.inf)
+            for idx in range(n_segments):
+                A = path[idx]
+                B = path[idx + 1]
+                vec_AB = B - A
+                seg_len_sq = np.dot(vec_AB, vec_AB)
+                if seg_len_sq < 1e-10:
+                    continue
+                vec_AC = cones - A
+                t = np.clip(np.dot(vec_AC, vec_AB) / seg_len_sq, 0, 1)
+                proj = A + t[:, np.newaxis] * vec_AB
+                dist = np.linalg.norm(cones - proj, axis=1)
+                min_cone_dist = np.minimum(min_cone_dist, dist)
+
+            # only consider cones within 2x track width of the path
+            near_mask = min_cone_dist < 6.0
+            if np.any(near_mask):
+                # mean probability radius of nearby cones
+                coord_conf_metric = float(np.mean(coordinate_confidence[near_mask]) ** 2)
 
 # normalization constants (expected values from AMZ paper)
     EXPECTED_MAX_ANGLE = np.pi / 4  # ~45 degrees max turn
@@ -229,16 +256,18 @@ def evaluate_path_cost(path, cones, colors=None):
     EXPECTED_TRACKWIDTH_VAR = 0.5   # ~0.5m variance in track width (should be consistent ~3m)
     EXPECTED_COLOR_UNCERTAINTY = 0.25  # 25% average uncertainty
     EXPECTED_LENGTH_DEV = 2.0       # ~2m deviation from target
+    EXPECTED_COORD_RADIUS = 0.5     # ~0.5m average positional uncertainty
 
-# normalized metrics (AMZ formula uses norm() which divides by expected value)
-    norm_angle = angle_metric / (EXPECTED_MAX_ANGLE ** 2) if EXPECTED_MAX_ANGLE > 0 else angle_metric
-    norm_smoothness = smoothness_metric / (EXPECTED_MAX_ANGLE ** 2) if EXPECTED_MAX_ANGLE > 0 else smoothness_metric
-    norm_spacing = spacing_metric / (EXPECTED_SPACING_VAR ** 2) if EXPECTED_SPACING_VAR > 0 else spacing_metric
-    norm_trackwidth = trackwidth_metric / (EXPECTED_TRACKWIDTH_VAR ** 2) if EXPECTED_TRACKWIDTH_VAR > 0 else trackwidth_metric
-    norm_color = color_metric / (EXPECTED_COLOR_UNCERTAINTY ** 2) if EXPECTED_COLOR_UNCERTAINTY > 0 else color_metric
-    norm_length = length_metric / (EXPECTED_LENGTH_DEV ** 2) if EXPECTED_LENGTH_DEV > 0 else length_metric
+# normalized metrics
+    norm_angle = angle_metric / EXPECTED_MAX_ANGLE if EXPECTED_MAX_ANGLE > 0 else angle_metric
+    norm_smoothness = smoothness_metric / EXPECTED_MAX_ANGLE if EXPECTED_MAX_ANGLE > 0 else smoothness_metric
+    norm_spacing = spacing_metric / EXPECTED_SPACING_VAR if EXPECTED_SPACING_VAR > 0 else spacing_metric
+    norm_trackwidth = trackwidth_metric / EXPECTED_TRACKWIDTH_VAR if EXPECTED_TRACKWIDTH_VAR > 0 else trackwidth_metric
+    norm_color = color_metric / EXPECTED_COLOR_UNCERTAINTY if EXPECTED_COLOR_UNCERTAINTY > 0 else color_metric
+    norm_length = length_metric / EXPECTED_LENGTH_DEV if EXPECTED_LENGTH_DEV > 0 else length_metric
+    norm_coord = coord_conf_metric / EXPECTED_COORD_RADIUS if EXPECTED_COORD_RADIUS > 0 else coord_conf_metric
 
-# total cost (AMZ formula with tunable weights)
+# total cost
     cost = (
         2.5 * norm_angle           # qc: penalize sharp turns
         + 1.5 * norm_smoothness    # curve smoothness
@@ -247,5 +276,6 @@ def evaluate_path_cost(path, cones, colors=None):
         + 2 * norm_color         # qcolor: color confidence
         + 1 * norm_length        # ql: path length deviation
         + 10 * boundary_violation_metric  # high penalty for wrong side (not normalized, already 0-1)
+        + 2.0 * norm_coord      # qcoord: positional uncertainty
     )
     return float(cost)

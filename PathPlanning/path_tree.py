@@ -41,7 +41,7 @@ def find_nearest_waypoints(vehicle_pos: ArrayLike, vehicle_heading: float, waypo
     k_waypoints = masked_waypoints[k_indices]
     return [tuple(np.round(wp, decimals=6)) for wp in k_waypoints]
 
-def get_path_tree(cones: ArrayLike, colors: ArrayLike, vehicle_pos: ArrayLike, vehicle_heading: float, max_depth: int, k_start: int) -> List[List[Tuple[float, float]]]:
+def get_path_tree(cones: ArrayLike, coordinate_confidence: ArrayLike, colors: ArrayLike, vehicle_pos: ArrayLike, vehicle_heading: float, max_depth: int, k_start: int) -> List[List[Tuple[float, float]]]:
     """
     Generate breadth-first tree of possible paths through waypoint graph.
 
@@ -55,21 +55,30 @@ def get_path_tree(cones: ArrayLike, colors: ArrayLike, vehicle_pos: ArrayLike, v
 
     # create starting level from selected waypoints
     current_level = [[wp] for wp in starting_waypoints]
+    all_completed = []
 
     # iterate in range of max depth to get possible paths
     for _ in range(max_depth):
         next_level = []
         for path in current_level:
             last = path[-1]     # get the last coordinate in the path
+            extended = False    # checks if the paths got extended
             for next_wp in waypoint_graph.get(last, set()):
                 # only add waypoints that are forward AND not already visited
                 if next_wp not in path and is_forward(next_wp, vehicle_pos, vehicle_heading):
                     next_level.append(path + [next_wp])
-                    
+                    extended = True
+            if not extended and len(path) >= 4:
+                all_completed.append(path)
+
         # we should prune here and cut the list down
         if len(next_level) > cfg.BEAM_WIDTH:
-            next_level = beam_search_prune(next_level, cones, colors, cfg.BEAM_WIDTH)
+            next_level = beam_search_prune(next_level, cones, coordinate_confidence, colors, cfg.BEAM_WIDTH)
+
+        if not next_level:
+            break
+
         current_level = next_level
-    
-    # return current list of paths
-    return current_level
+
+    # return completed paths + any still-extending paths
+    return all_completed + current_level
