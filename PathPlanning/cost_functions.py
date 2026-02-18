@@ -223,7 +223,7 @@ def evaluate_path_cost(path, cones, coordinate_confidence, colors=None):
     else:
         boundary_violation_metric = 0.0
         
-    # coordinate confidence metric — penalize paths near positionally uncertain cones
+    # coordinate confidence metric
     coord_conf_metric = 0.0
     if coordinate_confidence is not None:
         coordinate_confidence = np.asarray(coordinate_confidence, float)
@@ -259,13 +259,13 @@ def evaluate_path_cost(path, cones, coordinate_confidence, colors=None):
     EXPECTED_COORD_RADIUS = 0.5     # ~0.5m average positional uncertainty
 
 # normalized metrics
-    norm_angle = angle_metric / EXPECTED_MAX_ANGLE if EXPECTED_MAX_ANGLE > 0 else angle_metric
-    norm_smoothness = smoothness_metric / EXPECTED_MAX_ANGLE if EXPECTED_MAX_ANGLE > 0 else smoothness_metric
-    norm_spacing = spacing_metric / EXPECTED_SPACING_VAR if EXPECTED_SPACING_VAR > 0 else spacing_metric
-    norm_trackwidth = trackwidth_metric / EXPECTED_TRACKWIDTH_VAR if EXPECTED_TRACKWIDTH_VAR > 0 else trackwidth_metric
-    norm_color = color_metric / EXPECTED_COLOR_UNCERTAINTY if EXPECTED_COLOR_UNCERTAINTY > 0 else color_metric
-    norm_length = length_metric / EXPECTED_LENGTH_DEV if EXPECTED_LENGTH_DEV > 0 else length_metric
-    norm_coord = coord_conf_metric / EXPECTED_COORD_RADIUS if EXPECTED_COORD_RADIUS > 0 else coord_conf_metric
+    norm_angle = angle_metric / EXPECTED_MAX_ANGLE
+    norm_smoothness = smoothness_metric / EXPECTED_MAX_ANGLE
+    norm_spacing = spacing_metric / EXPECTED_SPACING_VAR
+    norm_trackwidth = trackwidth_metric / EXPECTED_TRACKWIDTH_VAR
+    norm_color = color_metric / EXPECTED_COLOR_UNCERTAINTY 
+    norm_length = length_metric / EXPECTED_LENGTH_DEV 
+    norm_coord = coord_conf_metric / EXPECTED_COORD_RADIUS
 
 # total cost
     cost = (
