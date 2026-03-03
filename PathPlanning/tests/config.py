@@ -11,7 +11,7 @@ CONE_COLOR_ORANGE_LARGE = 3  # Start/finish lines
 
 # Path Tree & Beam Search Parameters
 BEAM_WIDTH = 10       # Number of best paths to keep at each tree level
-MAX_TREE_DEPTH = 15   # Maximum number of waypoints to look ahead
+MAX_TREE_DEPTH = 30   # Maximum number of waypoints to look ahead
 K_START = 3           # Number of nearest waypoints to start path tree from
 
 # Path Smoothing Parameters
