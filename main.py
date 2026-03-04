@@ -10,9 +10,13 @@ from depthEstimator import DepthEstimator
 from coneSegmentor import ConeSegmentor
 from distanceEstimator import DistanceEstimator
 from visualizationUtils import createFourTileVisualization
+from coneLocalizer import perceptionToDetections
 
 sys.path.append(os.path.join(os.path.dirname(__file__), 'DepthEstimation'))
 from ground_plane_ransac import estimateGroundPlane, getCameraIntrinsics
+
+sys.path.append(os.path.join(os.path.dirname(__file__), 'Localization'))
+from filter import ConeFilter
 
 def perception(image, depthEstimator, coneSegmentor, distEstimator, cameraIntrinsics):
     depthMap = depthEstimator.estimateDepth(image)
@@ -43,6 +47,7 @@ def main():
     depthEstimator = DepthEstimator()
     coneSegmentor = ConeSegmentor()
     distEstimator = DistanceEstimator()
+    coneFilter = ConeFilter()
 
     framePattern = os.path.join('SampleData', 'driverless-10fps', 'frame_*.jpg')
     frameFiles = sorted(glob.glob(framePattern))
@@ -102,6 +107,23 @@ def main():
         visPath = os.path.join(outputDir, f'vis_{frameName}.png')
         visBgr = cv2.cvtColor(visualization, cv2.COLOR_RGB2BGR)
         cv2.imwrite(visPath, visBgr)
+
+        # Convert perception output to vehicle-frame detections and update cone map
+        localizationDetections = perceptionToDetections(
+            segmentationResults['boxes'], segmentationResults['classes'],
+            segmentationResults['confidences'], coneDistances, cameraIntrinsics
+        )
+        coneFilter.update(localizationDetections, dx=0, dy=0, dyaw=0)
+
+        mapPath = os.path.join(outputDir, f'map_{frameName}.png')
+        coneFilter.visualize(savePath=mapPath, showPlot=False)
+
+        coneMap = coneFilter.getConeMap()
+        mapData = [{'x': c[0], 'y': c[1], 'blue': c[2], 'yellow': c[3],
+                     'sOrange': c[4], 'lOrange': c[5]} for c in coneMap]
+        mapJsonPath = os.path.join(outputDir, f'map_{frameName}.json')
+        with open(mapJsonPath, 'w') as f:
+            json.dump(mapData, f, indent=2)
 
     print("Processing complete!")
 
