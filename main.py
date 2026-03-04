@@ -10,13 +10,16 @@ from depthEstimator import DepthEstimator
 from coneSegmentor import ConeSegmentor
 from distanceEstimator import DistanceEstimator
 from visualizationUtils import createFourTileVisualization
-from coneLocalizer import perceptionToDetections
+from coneLocalizer import perceptionToDetections, coneFilterToPathPlannerInput
 
 sys.path.append(os.path.join(os.path.dirname(__file__), 'DepthEstimation'))
 from ground_plane_ransac import estimateGroundPlane, getCameraIntrinsics
 
 sys.path.append(os.path.join(os.path.dirname(__file__), 'Localization'))
 from filter import ConeFilter
+
+sys.path.append(os.path.join(os.path.dirname(__file__), 'PathPlanning'))
+from path_planner import plan_path
 
 def perception(image, depthEstimator, coneSegmentor, distEstimator, cameraIntrinsics):
     depthMap = depthEstimator.estimateDepth(image)
@@ -115,8 +118,31 @@ def main():
         )
         coneFilter.update(localizationDetections, dx=0, dy=0, dyaw=0)
 
+        # Path planning
+        smoothPath = None
+        pathPlannerInput = coneFilterToPathPlannerInput(coneFilter.cones)
+        if pathPlannerInput is not None:
+            positions, coordinateConfidence, colors = pathPlannerInput
+            smoothPath, curvature = plan_path(
+                positions, coordinateConfidence, colors,
+                np.array([0.0, 0.0]), 0.0
+            )
+
+            if smoothPath is not None:
+                pathData = {
+                    'smoothPath': smoothPath.tolist(),
+                    'curvature': curvature.tolist()
+                }
+                pathJsonPath = os.path.join(outputDir, f'path_{frameName}.json')
+                with open(pathJsonPath, 'w') as f:
+                    json.dump(pathData, f, indent=2)
+            else:
+                print(f"  No valid path found for {frameName}")
+        else:
+            print(f"  Insufficient cones for path planning in {frameName}")
+
         mapPath = os.path.join(outputDir, f'map_{frameName}.png')
-        coneFilter.visualize(savePath=mapPath, showPlot=False)
+        coneFilter.visualize(savePath=mapPath, showPlot=False, plannedPath=smoothPath)
 
         coneMap = coneFilter.getConeMap()
         mapData = [{'x': c[0], 'y': c[1], 'blue': c[2], 'yellow': c[3],
