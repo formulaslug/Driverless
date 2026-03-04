@@ -51,3 +51,13 @@ def perceptionToDetections(boxes, classes, confidences, coneDistances, cameraInt
         detections.append((xVeh, yVeh, *colorConfs))
 
     return detections
+
+def coneFilterToPathPlannerInput(cones):
+    if cones is None or len(cones) < 4:
+        return None
+
+    positions = np.array([[cone.x, cone.y] for cone in cones])
+    coordinateConfidence = np.array([np.sqrt(np.trace(cone.cov) / 2) for cone in cones])
+    colors = np.array([cone.colorConfidences for cone in cones])
+
+    return positions, coordinateConfidence, colors
