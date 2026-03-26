@@ -25,6 +25,12 @@ def perception(image, depthEstimator, coneSegmentor, distEstimator, cameraIntrin
     depthMap = depthEstimator.estimateDepth(image)
     segmentationResults = coneSegmentor.segment(image)
 
+    calibratedScale = distEstimator.calibrateDepthScale(
+        segmentationResults['boxes'],
+        segmentationResults['classes'],
+        depthMap
+    )
+
     planeParams, inlierRatio, inlierMask = estimateGroundPlane(
         depthMap,
         cameraIntrinsics,
@@ -33,17 +39,18 @@ def perception(image, depthEstimator, coneSegmentor, distEstimator, cameraIntrin
         inlierThreshold=0.1,
         maxTrials=100,
         maxTiltAngle=45,
-        depthScale=10.0
+        depthScale=calibratedScale
     )
 
     coneDistances = distEstimator.estimateAllCones(
         segmentationResults['boxes'],
         segmentationResults['classes'],
         depthMap,
-        planeParams
+        planeParams,
+        depthScale=calibratedScale
     )
 
-    return depthMap, segmentationResults, planeParams, inlierMask, coneDistances
+    return depthMap, segmentationResults, planeParams, inlierMask, coneDistances, calibratedScale
 
 def main():
     print("Initializing models...")
@@ -70,9 +77,10 @@ def main():
         H, W = image.shape[:2]
         cameraIntrinsics = getCameraIntrinsics(W, H, fov=90)
 
-        depthMap, segmentationResults, planeParams, inlierMask, coneDistances = perception(
+        depthMap, segmentationResults, planeParams, inlierMask, coneDistances, calibratedScale = perception(
             image, depthEstimator, coneSegmentor, distEstimator, cameraIntrinsics
         )
+        print(f"  Calibrated depth scale: {calibratedScale:.4f}")
 
         depthPath = os.path.join(outputDir, f'depth_{frameName}.npy')
         np.save(depthPath, depthMap)
@@ -104,7 +112,7 @@ def main():
 
         visualization = createFourTileVisualization(
             image, depthMap, segmentationResults, planeParams, inlierMask,
-            coneDistances, cameraIntrinsics, depthScale=10.0
+            coneDistances, cameraIntrinsics, depthScale=calibratedScale
         )
 
         visPath = os.path.join(outputDir, f'vis_{frameName}.png')
