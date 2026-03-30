@@ -6,7 +6,6 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 from pathlib import Path
-from sklearn.linear_model import RANSACRegressor
 import json
 
 GOPRO_PRESETS = {
@@ -93,40 +92,59 @@ def estimateGroundPlane(depthMap, cameraIntrinsics, exclusionAreas=None, subsamp
 
     points3d = np.array(points3d)
 
-    X = points3d[:, :2]
-    y = points3d[:, 2]
+    # 3-point RANSAC with cross-product plane fitting
+    rng = np.random.RandomState(42)
+    bestInlierCount = 0
+    bestInlierMask = None
 
-    ransac = RANSACRegressor(
-        residual_threshold=inlierThreshold,
-        max_trials=maxTrials,
-        random_state=42
-    )
+    for _ in range(maxTrials):
+        sampleIdx = rng.choice(len(points3d), 3, replace=False)
+        p1, p2, p3 = points3d[sampleIdx]
 
-    try:
-        ransac.fit(X, y)
-    except Exception as e:
+        normal = np.cross(p2 - p1, p3 - p1)
+        normalLen = np.linalg.norm(normal)
+        if normalLen < 1e-10:
+            continue
+        normal /= normalLen
+
+        d = np.dot(normal, p1)
+        distances = np.abs(points3d @ normal - d)
+        inlierMask = distances < inlierThreshold
+        inlierCount = inlierMask.sum()
+
+        if inlierCount > bestInlierCount:
+            bestInlierCount = inlierCount
+            bestInlierMask = inlierMask
+
+    if bestInlierMask is None or bestInlierCount < 3:
         return None, 0.0, None
 
-    a, b = ransac.estimator_.coef_
-    c = -1
-    d = ransac.estimator_.intercept_
+    # SVD refit on best inlier set for a more accurate plane
+    inlierPoints = points3d[bestInlierMask]
+    centroid = inlierPoints.mean(axis=0)
+    centered = inlierPoints - centroid
+    _, _, Vt = np.linalg.svd(centered, full_matrices=False)
+    normal = Vt[-1]
+    d = np.dot(normal, centroid)
 
-    norm = np.sqrt(a**2 + b**2 + c**2)
-    if norm == 0:
-        return None, 0.0, None
-    planeParams = np.array([a, b, c, -d]) / norm
+    if np.dot(normal, np.array([0, -1, 0])) < 0:
+        normal = -normal
+        d = -d
 
-    normal = planeParams[:3]
+    planeParams = np.array([normal[0], normal[1], normal[2], d])
+
     upVector = np.array([0, -1, 0])
     dotProduct = np.abs(np.dot(normal, upVector))
     tiltAngle = np.degrees(np.arccos(np.clip(dotProduct, 0, 1)))
     if tiltAngle > maxTiltAngle:
         return None, 0.0, None
 
-    inlierRatio = ransac.inlier_mask_.sum() / len(points3d)
+    finalDistances = np.abs(points3d @ normal - d)
+    finalInlierMask = finalDistances < inlierThreshold
+    inlierRatio = finalInlierMask.sum() / len(points3d)
 
     fullInlierMask = np.zeros(depthMap.shape, dtype=bool)
-    for idx, isInlier in enumerate(ransac.inlier_mask_):
+    for idx, isInlier in enumerate(finalInlierMask):
         v, u = pointIndices[idx]
         fullInlierMask[v, u] = isInlier
 
