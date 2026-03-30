@@ -14,7 +14,7 @@ class DistanceEstimator:
             self.fy = cameraIntrinsics['fy']
             self.cx = cameraIntrinsics['cx']
             self.cy = cameraIntrinsics['cy']
-            self.fov = cameraIntrinsics.get('fov', 90)
+            self.fov = cameraIntrinsics.get('fov', 120)
             self.depthScale = cameraIntrinsics.get('depthScale', 10.0)
         else:
             if cameraConfigPath is None:
