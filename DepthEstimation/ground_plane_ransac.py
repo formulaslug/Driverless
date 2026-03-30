@@ -120,6 +120,8 @@ def estimateGroundPlane(depthMap, cameraIntrinsics, exclusionAreas=None, subsamp
     upVector = np.array([0, -1, 0])
     dotProduct = np.abs(np.dot(normal, upVector))
     tiltAngle = np.degrees(np.arccos(np.clip(dotProduct, 0, 1)))
+    if tiltAngle > maxTiltAngle:
+        return None, 0.0, None
 
     inlierRatio = ransac.inlier_mask_.sum() / len(points3d)
 
