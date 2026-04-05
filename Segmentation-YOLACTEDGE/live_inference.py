@@ -71,7 +71,7 @@ def parse_args(argv=None):
 def live_camera(net:Yolact, camera_idx:int=0):
 
     #open webcam
-    vid = cv2.VideoCapture(camera_idx)
+    vid = cv2.VideoCapture(camera_idx)        # validate output here
     if not vid.isOpened():
         print(f'Could not open camera')
         return
@@ -90,7 +90,11 @@ def live_camera(net:Yolact, camera_idx:int=0):
         net.detect.use_fast_nms = True      #removes duplicate detections for same object when network runs
         cfg.mask_proto_debug = False
         while True:
-            frame = torch.from_numpy(vid.read()[1]).cuda().float()
+            ret, raw_frame = vid.read()  ##unpacks read video and checks if it is None
+            if not ret or raw_frame is None:  #ret checks boolean return value and raw_frame checks for data
+                print("Failed to read frame from camera.")
+                break
+            frame = torch.from_numpy(raw_frame).cuda().float() # changed to take in pre-run vid.read()
             batch = transform(frame.unsqueeze(0))
 
             if frame_idx % every_k_frames == 0 or cfg.flow.warp_mode == 'none':  #every kth frame or if flow is disabled, run full backbone
@@ -98,6 +102,10 @@ def live_camera(net:Yolact, camera_idx:int=0):
                         "moving_statistics": moving_statistics}
                 with torch.no_grad():
                     net_outs = net(batch, extras=extras)
+                    if net_outs is None: # checks network output and skips frame if not valid
+                        print("Netowrk return invalid, skipping frame")
+                        frame_idx += 1
+                        continue
                 moving_statistics["feats"] = net_outs["feats"]      #saves features so the next 4 frames can reuse
                 moving_statistics["lateral"] = net_outs["lateral"]  #FPN's lateral connections
             else:
@@ -105,10 +113,21 @@ def live_camera(net:Yolact, camera_idx:int=0):
                         "moving_statistics": moving_statistics}
                 with torch.no_grad():
                     net_outs = net(batch, extras=extras)
-
+                    if net_outs is None: # checks network output and skips frame if not valid
+                        print("Netowrk return invalid, skipping frame")
+                        frame_idx += 1
+                        continue
+            
             preds = net_outs["pred_outs"]
 
-            classes, scores, boxes, masks = postprocess(preds, frame_width, frame_height, crop_masks=args.crop, score_threshold=args.score_threshold)
+            result = postprocess(preds, frame_width, frame_height, crop_masks=args.crop, score_threshold=args.score_threshold)
+
+            if result is None or len(result) != 4: #checks postprocess output validity skipping frame if invalid
+                print("postprocess() returned invalid output, skipping frame")
+                frame_idx += 1
+                continue
+
+            classes, scores, boxes, masks = result
 
             if classes.size(0) > 0:
                 n = min(args.top_k, classes.size(0))
@@ -166,7 +185,11 @@ if __name__ == '__main__':
         logger.info('Loading model...')
         net = Yolact(training=False)
         if args.trained_model is not None:
-            net.load_weights(args.trained_model, args=args)
+            try:  #make sure weights load, if not show error
+                net.load_weights(args.trained_model, args=args)
+            except Exception as e:
+                logger.error(f"Failed to load weights: {e}")
+                exit(1)
         else:
             logger.warning("No weights loaded!")
         net.eval()

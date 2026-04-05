@@ -45,3 +45,38 @@ Each frame prints a detection dictionary:
 - `masks` — `np.array` (bool) — Per-detection binary segmentation mask at frame resolution
 
 Detections below `--score_threshold` are filtered out. The `--top_k` flag limits the max number of detections per frame.
+
+# External Calls
+
+### PyTorch (`torch`, `torch.backends.cudnn`)
+- `torch.from_numpy()` — converts numpy frame to tensor
+- `torch.no_grad()` — disables gradient tracking during inference
+- `torch.cuda.FloatTensor` / `torch.FloatTensor` — sets default tensor type
+- `cudnn.benchmark`, `cudnn.fastest`, `cudnn.deterministic` — CUDA performance flags
+
+### OpenCV (`cv2`)
+- `cv2.VideoCapture()` — opens camera stream
+- `vid.read()` — reads a frame from the camera
+- `vid.get(cv2.CAP_PROP_FRAME_WIDTH/HEIGHT)` — gets camera resolution
+- `vid.release()` — closes camera stream
+
+### NumPy (`numpy`)
+- `.cpu().numpy()` on tensors to convert detections to arrays
+
+### yolact_edge
+- `FastBaseTransform()` — resizes and normalizes frames before inference
+- `net()` — runs the neural network inference
+- `postprocess()` — converts raw network output to classes, scores, boxes, masks
+- `convert_to_tensorrt()` — optimizes the model for Jetson using TensorRT
+- `Yolact()` — instantiates the model
+- `net.load_weights()` — loads trained weights from file
+
+## Failure Modes
+
+| Location | Failure | Returns |
+|---|---|---|
+| `cv2.VideoCapture()` | Camera not found or unavailable | Exits `live_camera()` early |
+| `vid.read()` | There is no frame read | Breaks out of inference loop |
+| `net()` | Model returns None or missing keys | Skips frame, increments frame counter |
+| `postprocess()` | Returns None or wrong number of values(4 because of classes, scores, boxes, masks) | Skips frame, increments frame counter |
+| `net.load_weights()` | Weights file missing or corrupt | Logs error, exits program |
