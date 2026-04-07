@@ -10,13 +10,26 @@ from depthEstimator import DepthEstimator
 from coneSegmentor import ConeSegmentor
 from distanceEstimator import DistanceEstimator
 from visualizationUtils import createFourTileVisualization
+from coneLocalizer import perceptionToDetections, coneFilterToPathPlannerInput
 
 sys.path.append(os.path.join(os.path.dirname(__file__), 'DepthEstimation'))
 from ground_plane_ransac import estimateGroundPlane, getCameraIntrinsics
 
+sys.path.append(os.path.join(os.path.dirname(__file__), 'Localization'))
+from filter import ConeFilter
+
+sys.path.append(os.path.join(os.path.dirname(__file__), 'PathPlanning'))
+from path_planner import plan_path
+
 def perception(image, depthEstimator, coneSegmentor, distEstimator, cameraIntrinsics):
     depthMap = depthEstimator.estimateDepth(image)
     segmentationResults = coneSegmentor.segment(image)
+
+    calibratedScale = distEstimator.calibrateDepthScale(
+        segmentationResults['boxes'],
+        segmentationResults['classes'],
+        depthMap
+    )
 
     planeParams, inlierRatio, inlierMask = estimateGroundPlane(
         depthMap,
@@ -26,23 +39,25 @@ def perception(image, depthEstimator, coneSegmentor, distEstimator, cameraIntrin
         inlierThreshold=0.1,
         maxTrials=100,
         maxTiltAngle=45,
-        depthScale=10.0
+        depthScale=calibratedScale
     )
 
     coneDistances = distEstimator.estimateAllCones(
         segmentationResults['boxes'],
         segmentationResults['classes'],
         depthMap,
-        planeParams
+        planeParams,
+        depthScale=calibratedScale
     )
 
-    return depthMap, segmentationResults, planeParams, inlierMask, coneDistances
+    return depthMap, segmentationResults, planeParams, inlierMask, coneDistances, calibratedScale
 
 def main():
     print("Initializing models...")
     depthEstimator = DepthEstimator()
     coneSegmentor = ConeSegmentor()
     distEstimator = DistanceEstimator()
+    coneFilter = ConeFilter()
 
     framePattern = os.path.join('SampleData', 'driverless-10fps', 'frame_*.jpg')
     frameFiles = sorted(glob.glob(framePattern))
@@ -62,9 +77,10 @@ def main():
         H, W = image.shape[:2]
         cameraIntrinsics = getCameraIntrinsics(W, H, fov=90)
 
-        depthMap, segmentationResults, planeParams, inlierMask, coneDistances = perception(
+        depthMap, segmentationResults, planeParams, inlierMask, coneDistances, calibratedScale = perception(
             image, depthEstimator, coneSegmentor, distEstimator, cameraIntrinsics
         )
+        print(f"  Calibrated depth scale: {calibratedScale:.4f}")
 
         depthPath = os.path.join(outputDir, f'depth_{frameName}.npy')
         np.save(depthPath, depthMap)
@@ -96,12 +112,52 @@ def main():
 
         visualization = createFourTileVisualization(
             image, depthMap, segmentationResults, planeParams, inlierMask,
-            coneDistances, cameraIntrinsics, depthScale=10.0
+            coneDistances, cameraIntrinsics, depthScale=calibratedScale
         )
 
         visPath = os.path.join(outputDir, f'vis_{frameName}.png')
         visBgr = cv2.cvtColor(visualization, cv2.COLOR_RGB2BGR)
         cv2.imwrite(visPath, visBgr)
+
+        # Convert perception output to vehicle-frame detections and update cone map
+        localizationDetections = perceptionToDetections(
+            segmentationResults['boxes'], segmentationResults['classes'],
+            segmentationResults['confidences'], coneDistances, cameraIntrinsics
+        )
+        coneFilter.update(localizationDetections, dx=0, dy=0, dyaw=0)
+
+        # Path planning
+        smoothPath = None
+        pathPlannerInput = coneFilterToPathPlannerInput(coneFilter.cones)
+        if pathPlannerInput is not None:
+            positions, coordinateConfidence, colors = pathPlannerInput
+            smoothPath, curvature = plan_path(
+                positions, coordinateConfidence, colors,
+                np.array([0.0, 0.0]), 0.0
+            )
+
+            if smoothPath is not None:
+                pathData = {
+                    'smoothPath': smoothPath.tolist(),
+                    'curvature': curvature.tolist()
+                }
+                pathJsonPath = os.path.join(outputDir, f'path_{frameName}.json')
+                with open(pathJsonPath, 'w') as f:
+                    json.dump(pathData, f, indent=2)
+            else:
+                print(f"  No valid path found for {frameName}")
+        else:
+            print(f"  Insufficient cones for path planning in {frameName}")
+
+        mapPath = os.path.join(outputDir, f'map_{frameName}.png')
+        coneFilter.visualize(savePath=mapPath, showPlot=False, plannedPath=smoothPath)
+
+        coneMap = coneFilter.getConeMap()
+        mapData = [{'x': c[0], 'y': c[1], 'blue': c[2], 'yellow': c[3],
+                     'sOrange': c[4], 'lOrange': c[5]} for c in coneMap]
+        mapJsonPath = os.path.join(outputDir, f'map_{frameName}.json')
+        with open(mapJsonPath, 'w') as f:
+            json.dump(mapData, f, indent=2)
 
     print("Processing complete!")
 

@@ -57,6 +57,9 @@ def plan_path(
         return None, None
 
     # smooth the path and calculate curvature
-    smooth_coords, curvature = smooth_path(np.array(best_path), num_points=cfg.SPLINE_NUM_POINTS)
+    try:
+        smooth_coords, curvature = smooth_path(np.array(best_path), num_points=cfg.SPLINE_NUM_POINTS)
+    except Exception:
+        return None, None
 
     return smooth_coords, curvature

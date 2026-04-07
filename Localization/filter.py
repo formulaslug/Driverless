@@ -205,7 +205,7 @@ class ConeFilter:
 
         self.cones = [cone for cone in self.cones if cone.age <= self.maxAge]
 
-    def visualize(self, savePath=None, showPlot=True):
+    def visualize(self, savePath=None, showPlot=True, plannedPath=None):
         fig, ax = plt.subplots(figsize=(10, 10))
 
         coneColors = {
@@ -266,6 +266,10 @@ class ConeFilter:
         else:
             ax.set_xlim(-2, 20)
             ax.set_ylim(-10, 10)
+
+        if plannedPath is not None:
+            ax.plot(plannedPath[:, 0], plannedPath[:, 1], 'r-', linewidth=2, label='Planned Path', zorder=8)
+            ax.legend(loc='upper left')
 
         if savePath is not None:
             plt.savefig(savePath, dpi=150, bbox_inches='tight')
