@@ -1,12 +1,10 @@
-
 import numpy as np
 import polars as pl
 from typing import Optional, Tuple, List
 
 from imu_integration import estimate_pose_from_imu
 from synchronize import PerceptionSynchronizer
-# Daniel's filter module
-from Localization.filter import ConeFilter
+from Localization import ConeFilter
 
 class EgoMotionEstimator:
 

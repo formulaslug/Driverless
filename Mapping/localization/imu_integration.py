@@ -12,7 +12,6 @@ def load_imu_data(csv_path: str) -> pl.DataFrame:
     
     return imu_df
 
-
 def estimate_pose_from_imu(imu_df: pl.DataFrame) -> pl.DataFrame:
     """
     Integration chain:
@@ -58,7 +57,6 @@ def estimate_pose_from_imu(imu_df: pl.DataFrame) -> pl.DataFrame:
     imu_df = imu_df.with_columns(
         pl.col("dtheta").cum_sum().alias("theta")
     )
-
 
     return imu_df.select([
         "time_s",     # Timestamp (seconds)
