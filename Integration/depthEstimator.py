@@ -1,86 +1,60 @@
-import sys
 import os
+import sys
+import numpy as np
+import cv2
+import torch
 
 os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
 
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'DepthEstimation', 'Depth-Anything-V2'))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'DepthEstimation', 'Depth-Anything-3', 'src'))
 
-import torch
-import numpy as np
-import cv2
-from depth_anything_v2.dpt import DepthAnythingV2
+from depth_anything_3.api import DepthAnything3
 
 class DepthEstimator:
-    def __init__(self, device='auto', modelSize='vits'):
+    # fov and imageWidth are used to compute focalLength for metric depth scaling.
+    # metricDepth = focalLength * relativeDepth / 300.0  (DA3 metric scaling formula)
+    def __init__(self, device='auto', fov=None, imageWidth=None, focalLength=None):
         if device == 'auto':
             if torch.cuda.is_available():
-                self.device = "cuda"
+                self.device = torch.device('cuda')
             elif torch.backends.mps.is_available():
-                self.device = "mps"
+                self.device = torch.device('mps')
             else:
-                self.device = "cpu"
+                self.device = torch.device('cpu')
         else:
-            self.device = device
+            self.device = torch.device(device)
 
-        modelConfigs = {
-            'vits': {'encoder': 'vits', 'features': 64, 'out_channels': [48, 96, 192, 384]},
-            'vitb': {'encoder': 'vitb', 'features': 128, 'out_channels': [96, 192, 384, 768]},
-            'vitl': {'encoder': 'vitl', 'features': 256, 'out_channels': [256, 512, 1024, 1024]},
-            'vitg': {'encoder': 'vitg', 'features': 384, 'out_channels': [1536, 1536, 1536, 1536]}
-        }
-
-        if modelSize not in modelConfigs:
-            raise ValueError(f"Model size must be one of {list(modelConfigs.keys())}")
-
-        config = modelConfigs[modelSize]
-
-        self.model = DepthAnythingV2(**config)
-
-        modelFile = f'depth_anything_v2_{modelSize}.pth'
-        modelPath = os.path.join(
-            os.path.dirname(__file__),
-            '..',
-            'DepthEstimation',
-            'Depth-Anything-V2',
-            'checkpoints',
-            modelFile
-        )
-
-        if not os.path.exists(modelPath):
-            modelPath = f'checkpoints/{modelFile}'
-
-        self.modelLoaded = False
-        if os.path.exists(modelPath):
-            try:
-                self.model.load_state_dict(torch.load(modelPath, map_location='cpu'))
-                self.modelLoaded = True
-            except Exception as e:
-                print(f"Warning: Failed to load depth model from {modelPath}: {e}")
+        if focalLength is not None:
+            self.focalLength = focalLength
+        elif fov is not None and imageWidth is not None:
+            self.focalLength = imageWidth / (2 * np.tan(np.radians(fov) / 2))
         else:
-            print(f"Warning: Depth model not found at {modelPath}, using uninitialized weights")
+            self.focalLength = None
 
-        try:
-            self.model = self.model.to(self.device)
-        except Exception as e:
-            print(f"Warning: Failed to move model to {self.device}, falling back to CPU: {e}")
-            self.device = "cpu"
-            self.model = self.model.to(self.device)
-
+        self.model = DepthAnything3.from_pretrained('depth-anything/DA3-SMALL')
+        self.model.device = self.device
+        self.model = self.model.to(self.device)
         self.model.eval()
 
-    def estimateDepth(self, image, inputSize=518):
+    def estimateDepth(self, image):
         if not isinstance(image, np.ndarray):
             raise ValueError("Input image must be a numpy array")
-
         if len(image.shape) != 3 or image.shape[2] != 3:
             raise ValueError("Input image must be a 3-channel RGB image (H, W, 3)")
 
-        if not self.modelLoaded:
-            print("Warning: Running depth estimation with uninitialized model weights")
-
-        imageBgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        H, W = image.shape[:2]
 
         with torch.no_grad():
-            depth = self.model.infer_image(imageBgr, inputSize)
+            prediction = self.model.inference([image], process_res=504)
 
-        return depth
+        relativeDepth = prediction.depth[0]
+
+        if self.focalLength is not None:
+            metricDepth = self.focalLength * relativeDepth / 300.0
+        else:
+            metricDepth = relativeDepth
+
+        if metricDepth.shape != (H, W):
+            metricDepth = cv2.resize(metricDepth, (W, H), interpolation=cv2.INTER_LINEAR)
+
+        return metricDepth.astype(np.float32)

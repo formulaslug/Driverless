@@ -90,7 +90,7 @@ class DistanceEstimator:
 
         return distance if distance > 0 else None
 
-    def sampleDisparityForBox(self, box, depthMap):
+    def sampleDepthForBox(self, box, depthMap):
         if len(box) != 4:
             return None
 
@@ -132,36 +132,13 @@ class DistanceEstimator:
         return meanDisparity if meanDisparity != 0 else None
 
     def estimateDistanceDepthMap(self, box, depthMap, depthScale=None):
-        if depthScale is None:
-            depthScale = self.depthScale
-
-        meanDisparity = self.sampleDisparityForBox(box, depthMap)
-        if meanDisparity is None:
-            return None
-
-        return depthScale / meanDisparity
+        # depthMap is metric depth in meters; return mean depth directly
+        meanDepth = self.sampleDepthForBox(box, depthMap)
+        return meanDepth
 
     def calibrateDepthScale(self, boxes, classes, depthMap):
-        if boxes is None or len(boxes) == 0:
-            return self.depthScale
-
-        candidateScales = []
-
-        for i in range(len(boxes)):
-            bboxDist = self.estimateDistanceBbox(boxes[i], classes[i])
-            if bboxDist is None or bboxDist <= 0:
-                continue
-
-            meanDisparity = self.sampleDisparityForBox(boxes[i], depthMap)
-            if meanDisparity is None:
-                continue
-
-            candidateScales.append(bboxDist * meanDisparity)
-
-        if len(candidateScales) < 2:
-            return self.depthScale
-
-        return float(np.median(candidateScales))
+        # No-op: depth map is already metric
+        return 1.0
 
     def estimateDistanceGroundPlane(self, box, planeParams):
         if planeParams is None or len(planeParams) != 4:
