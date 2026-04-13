@@ -25,12 +25,6 @@ def perception(image, depthEstimator, coneSegmentor, distEstimator, cameraIntrin
     depthMap = depthEstimator.estimateDepth(image)
     segmentationResults = coneSegmentor.segment(image)
 
-    calibratedScale = distEstimator.calibrateDepthScale(
-        segmentationResults['boxes'],
-        segmentationResults['classes'],
-        depthMap
-    )
-
     planeParams, inlierRatio, inlierMask = estimateGroundPlane(
         depthMap,
         cameraIntrinsics,
@@ -39,7 +33,7 @@ def perception(image, depthEstimator, coneSegmentor, distEstimator, cameraIntrin
         inlierThreshold=0.1,
         maxTrials=100,
         maxTiltAngle=45,
-        depthScale=calibratedScale
+        isMetricDepth=True
     )
 
     coneDistances = distEstimator.estimateAllCones(
@@ -47,23 +41,27 @@ def perception(image, depthEstimator, coneSegmentor, distEstimator, cameraIntrin
         segmentationResults['classes'],
         depthMap,
         planeParams,
-        depthScale=calibratedScale
     )
 
-    return depthMap, segmentationResults, planeParams, inlierMask, coneDistances, calibratedScale
+    return depthMap, segmentationResults, planeParams, inlierMask, coneDistances
 
 def main():
-    print("Initializing models...")
-    depthEstimator = DepthEstimator()
-    coneSegmentor = ConeSegmentor()
-    distEstimator = DistanceEstimator()
-    coneFilter = ConeFilter()
-
     framePattern = os.path.join('SampleData', 'driverless-10fps', 'frame_*.jpg')
     frameFiles = sorted(glob.glob(framePattern))
 
     outputDir = 'output'
     os.makedirs(outputDir, exist_ok=True)
+
+    # Read first frame to get image dimensions for model initialization
+    firstImage = cv2.imread(frameFiles[0])
+    H, W = firstImage.shape[:2]
+    cameraIntrinsics = getCameraIntrinsics(W, H, fov=90)
+
+    print("Initializing models...")
+    depthEstimator = DepthEstimator(fov=90, imageWidth=W)
+    coneSegmentor = ConeSegmentor()
+    distEstimator = DistanceEstimator()
+    coneFilter = ConeFilter()
 
     print(f"Processing {len(frameFiles)} frames...")
 
@@ -74,13 +72,9 @@ def main():
         image = cv2.imread(frameFile)
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-        H, W = image.shape[:2]
-        cameraIntrinsics = getCameraIntrinsics(W, H, fov=90)
-
-        depthMap, segmentationResults, planeParams, inlierMask, coneDistances, calibratedScale = perception(
+        depthMap, segmentationResults, planeParams, inlierMask, coneDistances = perception(
             image, depthEstimator, coneSegmentor, distEstimator, cameraIntrinsics
         )
-        print(f"  Calibrated depth scale: {calibratedScale:.4f}")
 
         depthPath = os.path.join(outputDir, f'depth_{frameName}.npy')
         np.save(depthPath, depthMap)
@@ -112,7 +106,7 @@ def main():
 
         visualization = createFourTileVisualization(
             image, depthMap, segmentationResults, planeParams, inlierMask,
-            coneDistances, cameraIntrinsics, depthScale=calibratedScale
+            coneDistances, cameraIntrinsics
         )
 
         visPath = os.path.join(outputDir, f'vis_{frameName}.png')
