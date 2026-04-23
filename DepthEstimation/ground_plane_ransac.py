@@ -54,8 +54,8 @@ def loadExclusionAreas(jsonPath):
 
 def estimateGroundPlane(depthMap, cameraIntrinsics, exclusionAreas=None, subsampleStep=5,
                         inlierThreshold=0.1, maxTrials=100, maxTiltAngle=45,
-                        depthScale=10.0, maxDepth=100.0):
-    metricDepth = convertDisparityToDepth(depthMap, depthScale)
+                        depthScale=10.0, maxDepth=100.0, isMetricDepth=False):
+    metricDepth = depthMap if isMetricDepth else convertDisparityToDepth(depthMap, depthScale)
 
     H, W = metricDepth.shape
     fx = cameraIntrinsics['fx']
@@ -150,13 +150,13 @@ def estimateGroundPlane(depthMap, cameraIntrinsics, exclusionAreas=None, subsamp
 
     return planeParams, inlierRatio, fullInlierMask
 
-def generatePlaneGrid(planeParams, cameraIntrinsics, depthMap, gridSpacing=2.0, depthScale=10.0, maxDepth=100.0):
+def generatePlaneGrid(planeParams, cameraIntrinsics, depthMap, gridSpacing=2.0, depthScale=10.0, maxDepth=100.0, isMetricDepth=False):
     a, b, c, d = planeParams
 
     if abs(b) < 1e-6:
         return [], 0, 0
 
-    metricDepth = convertDisparityToDepth(depthMap, depthScale)
+    metricDepth = depthMap if isMetricDepth else convertDisparityToDepth(depthMap, depthScale)
     validDepths = metricDepth[(metricDepth > 0) & (metricDepth < maxDepth)]
     if len(validDepths) == 0:
         return [], 0, 0
