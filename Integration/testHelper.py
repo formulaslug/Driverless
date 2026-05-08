@@ -109,13 +109,13 @@ class TestHelper:
             return
 
         H, W = image.shape[:2]
-        cameraIntrinsics = getCameraIntrinsics(W, H, fov=90)
-        cameraIntrinsics['depthScale'] = 10.0
 
         print("Initializing models...")
-        depthEstimator = DepthEstimator()
+        distEstimator = DistanceEstimator()
+        cameraIntrinsics = getCameraIntrinsics(W, H, fov=distEstimator.fov)
+        cameraIntrinsics['depthScale'] = distEstimator.depthScale
+        depthEstimator = DepthEstimator(fov=distEstimator.fov, imageWidth=W)
         coneSegmentor = ConeSegmentor()
-        distEstimator = DistanceEstimator(cameraIntrinsics=cameraIntrinsics)
 
         rgbImage = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 

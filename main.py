@@ -56,12 +56,11 @@ def main():
     # Read first frame to get image dimensions for model initialization
     firstImage = cv2.imread(frameFiles[0])
     H, W = firstImage.shape[:2]
-    cameraIntrinsics = getCameraIntrinsics(W, H, fov=90)
-
     print("Initializing models...")
-    depthEstimator = DepthEstimator(fov=90, imageWidth=W)
-    coneSegmentor = ConeSegmentor()
     distEstimator = DistanceEstimator()
+    cameraIntrinsics = getCameraIntrinsics(W, H, fov=distEstimator.fov)
+    depthEstimator = DepthEstimator(fov=distEstimator.fov, imageWidth=W)
+    coneSegmentor = ConeSegmentor()
     coneFilter = ConeFilter()
 
     print(f"Processing {len(frameFiles)} frames...")
