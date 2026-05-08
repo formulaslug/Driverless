@@ -57,11 +57,13 @@ class DepthEstimator:
             procW = processRes if W >= H else round(W * processRes / H)
             actualFxProc = self.focalLength * procW / W
             predictedFxProc = float(prediction.intrinsics[0, 0, 0])
-            metricDepth = depth * actualFxProc / predictedFxProc if predictedFxProc > 1.0 else depth
-        elif self.focalLength is not None:
-            # Fallback: formula calibrated for DA3METRIC-LARGE (constant may be off for other models)
-            metricDepth = self.focalLength * depth / 300.0
+            if predictedFxProc > 1.0:
+                metricDepth = depth * actualFxProc / predictedFxProc
+            else:
+                print("Warning: DA3 predicted degenerate focal length; returning relative depth")
+                metricDepth = depth
         else:
+            print("Warning: cannot compute metric depth (no intrinsics or focal length); returning relative depth")
             metricDepth = depth
 
         if metricDepth.shape != (H, W):
