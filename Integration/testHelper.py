@@ -42,7 +42,6 @@ class TestHelper:
             print(f"Failed to load image from {self.imagePath}")
             return None
 
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         return image
 
     def displayFourTile(self, visualization, windowName='Pipeline Output'):
@@ -118,8 +117,10 @@ class TestHelper:
         coneSegmentor = ConeSegmentor()
         distEstimator = DistanceEstimator(cameraIntrinsics=cameraIntrinsics)
 
+        rgbImage = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
         print("Running depth estimation...")
-        depthMap = depthEstimator.estimateDepth(image)
+        depthMap = depthEstimator.estimateDepth(rgbImage)
 
         print("Running cone segmentation...")
         segResults = coneSegmentor.segment(image)
@@ -151,7 +152,7 @@ class TestHelper:
 
         print("Creating visualization...")
         visualization = createFourTileVisualization(
-            image,
+            rgbImage,
             depthMap,
             segResults,
             planeParams,
