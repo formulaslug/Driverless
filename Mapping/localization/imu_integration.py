@@ -1,5 +1,9 @@
 import polars as pl
 
+_G = 9.81 # m/s²
+_MDPS_TO_RADS = 1.0 / 57295.8   # milli-degrees-per-second -> radians/second
+
+
 def load_imu_data(csv_path: str) -> pl.DataFrame:
     if not csv_path or not isinstance(csv_path, str):
         raise ValueError("csv_path must be a non-empty string")
@@ -28,11 +32,12 @@ def load_imu_data(csv_path: str) -> pl.DataFrame:
 
     return imu_df
 
+
 def estimate_pose_from_imu(imu_df: pl.DataFrame) -> pl.DataFrame:
     """
     Integration chain:
-        ax_mg --> a_forward --> v_forward --> ds --> (dx_w, dy_w) --> (x, y)
-        gyro_z_mdps --> gyro_z_rads --> dtheta --> theta
+        ax_mg       -> a_forward -> v_forward -> ds
+        gyro_z_mdps -> dtheta   -> theta
     """
     required_cols = ["time_ms", "ax_mg", "ay_mg", "gyro_z_mdps"]
     missing = [c for c in required_cols if c not in imu_df.columns]
@@ -41,40 +46,29 @@ def estimate_pose_from_imu(imu_df: pl.DataFrame) -> pl.DataFrame:
     if imu_df.is_empty():
         raise ValueError("imu_df is empty")
 
-    imu_df = imu_df.sort("time_ms").with_columns(
-        (pl.col("time_ms") / 1000.0).alias("time_s")
+    # Pass 1 - all expressions that depend only on raw input columns
+    # a_forward, dt, and dtheta are all needed by pass 2
+    imu_df = (
+        imu_df
+        .sort("time_ms")
+        .with_columns(
+            (pl.col("time_ms") / 1000.0).alias("time_s"),
+            (pl.col("ax_mg") / 1000.0 * _G).alias("a_forward"),
+        )
+        .with_columns(
+            pl.col("time_s").diff().fill_null(0.0).alias("dt"),
+        )
     )
 
+    # Pass 2 - columns that depend on dt (computed in pass 1)
+    # v_forward = cumsum(a_forward * dt); ds = v_forward * dt
+    # dtheta    = gyro_z_mdps * MDPS_TO_RADS * dt; theta = cumsum(dtheta)
     imu_df = imu_df.with_columns(
-        pl.col("time_s").diff().fill_null(0.0).alias("dt")
-    )
-
-    imu_df = imu_df.with_columns(
-        (pl.col("ax_mg") / 1000.0 * 9.81).alias("a_forward")
-    )
-
-    imu_df = imu_df.with_columns(
-        (pl.col("a_forward") * pl.col("dt")).alias("dv")
-    )
-
-    imu_df = imu_df.with_columns(
-        pl.col("dv").cum_sum().alias("v_forward")
-    )
-
-    imu_df = imu_df.with_columns(
-        (pl.col("v_forward") * pl.col("dt")).alias("ds")
-    )
-
-    imu_df = imu_df.with_columns(
-        (pl.col("gyro_z_mdps") / 57295.8).alias("gyro_z_rads")
-    )
-
-    imu_df = imu_df.with_columns(
-        (pl.col("gyro_z_rads") * pl.col("dt")).alias("dtheta")
-    )
-
-    imu_df = imu_df.with_columns(
-        pl.col("dtheta").cum_sum().alias("theta")
+        (pl.col("a_forward") * pl.col("dt")).cum_sum().alias("v_forward"),
+        (pl.col("gyro_z_mdps") * _MDPS_TO_RADS * pl.col("dt")).alias("dtheta"),
+    ).with_columns(
+        (pl.col("v_forward") * pl.col("dt")).alias("ds"),
+        pl.col("dtheta").cum_sum().alias("theta"),
     )
 
     result = imu_df.select([
