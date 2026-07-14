@@ -12,6 +12,7 @@ from depth_anything_3.api import DepthAnything3
 
 class DepthEstimator:
     # fov and imageWidth are used to compute focalLength for metric depth scaling.
+    # metricDepth = focalLength * relativeDepth / 300.0  (DA3 metric scaling formula)
     def __init__(self, device='auto', fov=None, imageWidth=None, focalLength=None):
         if device == 'auto':
             if torch.cuda.is_available():
@@ -43,28 +44,15 @@ class DepthEstimator:
 
         H, W = image.shape[:2]
 
-        processRes = 504
         with torch.no_grad():
-            prediction = self.model.inference([image], process_res=processRes)
+            prediction = self.model.inference([image], process_res=504)
 
-        depth = prediction.depth[0]
+        relativeDepth = prediction.depth[0]
 
-        if prediction.is_metric:
-            metricDepth = depth
-        elif self.focalLength is not None and prediction.intrinsics is not None:
-            # Scale relative depth: metric_depth = depth * (actual_fx / predicted_fx)
-            # Both focal lengths at the same (processed) resolution.
-            procW = processRes if W >= H else round(W * processRes / H)
-            actualFxProc = self.focalLength * procW / W
-            predictedFxProc = float(prediction.intrinsics[0, 0, 0])
-            if predictedFxProc > 1.0:
-                metricDepth = depth * actualFxProc / predictedFxProc
-            else:
-                print("Warning: DA3 predicted degenerate focal length; returning relative depth")
-                metricDepth = depth
+        if self.focalLength is not None:
+            metricDepth = self.focalLength * relativeDepth / 300.0
         else:
-            print("Warning: cannot compute metric depth (no intrinsics or focal length); returning relative depth")
-            metricDepth = depth
+            metricDepth = relativeDepth
 
         if metricDepth.shape != (H, W):
             metricDepth = cv2.resize(metricDepth, (W, H), interpolation=cv2.INTER_LINEAR)
