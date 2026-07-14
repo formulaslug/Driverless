@@ -22,7 +22,8 @@ sys.path.append(os.path.join(os.path.dirname(__file__), 'PathPlanning'))
 from path_planner import plan_path
 
 def perception(image, depthEstimator, coneSegmentor, distEstimator, cameraIntrinsics):
-    depthMap = depthEstimator.estimateDepth(image)
+    rgbImage = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    depthMap = depthEstimator.estimateDepth(rgbImage)
     segmentationResults = coneSegmentor.segment(image)
 
     planeParams, inlierRatio, inlierMask = estimateGroundPlane(
@@ -55,12 +56,11 @@ def main():
     # Read first frame to get image dimensions for model initialization
     firstImage = cv2.imread(frameFiles[0])
     H, W = firstImage.shape[:2]
-    cameraIntrinsics = getCameraIntrinsics(W, H, fov=90)
-
     print("Initializing models...")
-    depthEstimator = DepthEstimator(fov=90, imageWidth=W)
-    coneSegmentor = ConeSegmentor()
     distEstimator = DistanceEstimator()
+    cameraIntrinsics = getCameraIntrinsics(W, H, fov=distEstimator.fov)
+    depthEstimator = DepthEstimator(fov=distEstimator.fov, imageWidth=W)
+    coneSegmentor = ConeSegmentor()
     coneFilter = ConeFilter()
 
     print(f"Processing {len(frameFiles)} frames...")
@@ -70,7 +70,6 @@ def main():
         print(f"Processing {frameName}...")
 
         image = cv2.imread(frameFile)
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
         depthMap, segmentationResults, planeParams, inlierMask, coneDistances = perception(
             image, depthEstimator, coneSegmentor, distEstimator, cameraIntrinsics
@@ -105,7 +104,7 @@ def main():
             json.dump(distancesOutput, f, indent=2)
 
         visualization = createFourTileVisualization(
-            image, depthMap, segmentationResults, planeParams, inlierMask,
+            cv2.cvtColor(image, cv2.COLOR_BGR2RGB), depthMap, segmentationResults, planeParams, inlierMask,
             coneDistances, cameraIntrinsics
         )
 
