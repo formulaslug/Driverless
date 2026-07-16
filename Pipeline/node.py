@@ -1,5 +1,7 @@
+import sys
 import threading
 import queue
+import traceback
 
 # Sentinel pushed downstream on end-of-stream so worker threads exit cleanly.
 POISON = object()
@@ -51,7 +53,13 @@ class Node:
                         q.put(POISON)
                     return
                 continue
-            self._emitResult(self.process(message))
+            # A failing frame must not kill the thread, or downstream nodes never
+            # receive the poison pill and the graph deadlocks on shutdown.
+            try:
+                self._emitResult(self.process(message))
+            except Exception:
+                print(f"[{self.name}] error processing message; skipping frame", file=sys.stderr)
+                traceback.print_exc()
 
     def onShutdown(self):
         # Override for nodes that flush buffered state at end-of-stream.

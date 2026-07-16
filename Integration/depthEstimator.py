@@ -6,6 +6,11 @@ import torch
 
 os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
 
+# DA3 calls torch.cuda.is_bf16_supported() unconditionally, which raises on
+# CPU/MPS-only torch builds. Guard it so depth runs on non-CUDA hosts (Mac dev).
+_origIsBf16Supported = torch.cuda.is_bf16_supported
+torch.cuda.is_bf16_supported = lambda *a, **k: torch.cuda.is_available() and _origIsBf16Supported(*a, **k)
+
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'DepthEstimation', 'Depth-Anything-3', 'src'))
 
 from depth_anything_3.api import DepthAnything3
