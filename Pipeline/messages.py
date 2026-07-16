@@ -48,3 +48,24 @@ class PathMessage:
     frameId: int
     smoothPath: Optional[np.ndarray]
     curvature: Optional[np.ndarray]
+
+@dataclass
+class OdometryMessage:
+    frameId: int
+    dx: float
+    dy: float
+    dyaw: float
+
+# Future IMU input contract. The motion interface accepts these once real
+# sensor data is available; unused by the visual estimator today.
+@dataclass
+class ImuSample:
+    timestamp: float
+    accel: np.ndarray
+    gyro: np.ndarray
+    mag: Optional[np.ndarray] = None
+
+@dataclass
+class AnnotatedFrameMessage:
+    frameId: int
+    image: np.ndarray
