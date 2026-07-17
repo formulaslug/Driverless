@@ -6,7 +6,7 @@ import cv2
 # (post-decimation), frameName mirrors the legacy frame_%04d.jpg naming so
 # downstream outputs stay comparable to the offline frame-glob pipeline.
 class VideoSource:
-    def __init__(self, videoPath, targetFps=None, maxFrames=None):
+    def __init__(self, videoPath, targetFps=None, maxFrames=None, startFrame=0):
         if not os.path.exists(videoPath):
             raise FileNotFoundError(f"Video not found: {videoPath}")
 
@@ -18,6 +18,9 @@ class VideoSource:
         self.sourceFps = self.capture.get(cv2.CAP_PROP_FPS)
         self.targetFps = targetFps
         self.maxFrames = maxFrames
+        self.startFrame = startFrame
+        if startFrame:
+            self.capture.set(cv2.CAP_PROP_POS_FRAMES, startFrame)
 
         if targetFps is not None and self.sourceFps > 0:
             self.frameInterval = max(1, round(self.sourceFps / targetFps))
