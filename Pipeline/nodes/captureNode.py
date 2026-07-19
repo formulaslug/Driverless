@@ -13,9 +13,9 @@ from ground_plane_ransac import getCameraIntrinsics
 # derived from the actual frame size (not camera.json) so every downstream stage
 # shares one intrinsics source, matching how main.py builds them.
 class CaptureNode(SourceNode):
-    def __init__(self, videoPath, fov=90, targetFps=None, maxFrames=None, queueSize=8):
+    def __init__(self, videoPath, fov=90, targetFps=None, maxFrames=None, startFrame=0, queueSize=8):
         super().__init__('capture', queueSize)
-        self.source = VideoSource(videoPath, targetFps=targetFps, maxFrames=maxFrames)
+        self.source = VideoSource(videoPath, targetFps=targetFps, maxFrames=maxFrames, startFrame=startFrame)
         self.fov = fov
         self.cameraIntrinsics = None
 
