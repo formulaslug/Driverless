@@ -1,0 +1,12 @@
+{
+  "cones": [
+    { "id": 0, "color": "red",   "position": [5.0, 0.0, 0.0] },
+    { "id": 1, "color": "blue",  "position": [3.54, 3.54, 0.0] },
+    { "id": 2, "color": "yellow","position": [0.0, 5.0, 0.0] },
+    { "id": 3, "color": "red",   "position": [-3.54, 3.54, 0.0] },
+    { "id": 4, "color": "blue",  "position": [-5.0, 0.0, 0.0] },
+    { "id": 5, "color": "yellow","position": [-3.54, -3.54, 0.0] },
+    { "id": 6, "color": "red",   "position": [0.0, -5.0, 0.0] },
+    { "id": 7, "color": "blue",  "position": [3.54, -3.54, 0.0] }
+  ]
+}
