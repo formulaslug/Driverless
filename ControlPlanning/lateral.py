@@ -25,13 +25,13 @@ class Lateral():
         else:
             return 2 * np.sin(alpha) / l_d
 
-    def update(self, waypoints, x, y, yaw, v)
+    def update(self, waypoints, x, y, yaw, v):
         """
-        
+        pure pursuit algorithm, uses lookahead point from set of waypoinys which dist scales with velocity,
+        and returns a steering angle in radians(delta)
         """
-        lookahead = list()
-        min_lookahead = 3.0
-        L = max(self.K_dd * v, min_lookahead)
+        #L scales on velocity fo k_dd constant, min_lookahead is a safety if v is near 0
+        L = max(self.K_dd * v, self.min_lookahead)
 
 
         closest_idx = 0
@@ -42,18 +42,20 @@ class Lateral():
                 min_dist = dist
                 closest_idx = i
 
+        lookahead = waypoints[-1]  # safety to end waypoint 
 
-        lookahead = waypoints[-1]  # fallback
+        #for each waypoint past the index of the closest one, set the one to lookahead if its past distance L
         for waypoint in waypoints[closest_idx:]:
-            if distance_to(waypoint) >= L:
+            if self.distance_to(waypoint, x, y) >= L:
                 lookahead = list(waypoint)
                 break
             
-        l_d = distance_to(lookahead)
+        l_d = self.distance_to(lookahead, x, y)
         lookahead_vector = [lookahead[0] - x, lookahead[1] - y]
-        heading_vector = [np.cos(yaw), np.sin(yaw)]
 
         alpha = np.arctan2(lookahead_vector[1], lookahead_vector[0]) - (yaw)
-        k = get_curve(alpha=alpha, l_d=l_d)
+        k = self.get_curve(alpha=alpha, l_d=l_d)
 
-        delta = np.arctan(k * 1.5)
+        delta = np.arctan(k * self.wheelbase)
+
+        return delta

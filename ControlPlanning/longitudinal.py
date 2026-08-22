@@ -30,8 +30,5 @@ class Longitudinal:
 
         return a_des
 
-        #a_des input for vehcihle dynamic lookup to get throttle and break output
-
-
 
     
