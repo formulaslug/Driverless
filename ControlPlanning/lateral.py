@@ -12,7 +12,7 @@ class Lateral():
         """
         calculates distance to a target waypoint from current car 2d coords
         """
-        tar_x, tar_y, tar_v = tar_waypoint
+        tar_x, tar_y= tar_waypoint
         return np.sqrt((tar_x - x) ** 2  + (tar_y - y) ** 2 )
 
     def get_curve(self, alpha = 0, l_d = 0, R = 0):
@@ -58,4 +58,4 @@ class Lateral():
 
         delta = np.arctan(k * self.wheelbase)
 
-        return delta
+        return delta #delta is front wheel turning angleso 
