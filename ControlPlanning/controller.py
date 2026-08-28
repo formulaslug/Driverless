@@ -1,8 +1,7 @@
 from longitudinal import Longitudinal
 from lateral import Lateral
-from throttle_steering_control import ThrottleControl
-from throttle_steering_control import SteeringControl
-
+from throttle_control import ThrottleControl
+from steering_control import SteeringControl
 """
 INPUTS:
 - Waypoints in smooth_path

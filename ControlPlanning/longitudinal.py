@@ -7,17 +7,20 @@ class Longitudinal:
         self.K_p = K_p
         self.K_i = K_i
         self.K_d = K_d
+
+        self.intialized = False
     def update(self, v, v_desired, t):
         """
         PID longitudinal algorithm, updating state variables, and desired accel
         """
 
         # PID algo to compute desired accel
-        if self.t_previous == 0.0:
-             dt = 0.01
-
+        if not self.intialized:
+            dt = 0.01
+            self.intialized = True
         else:
              dt = t - self.t_previous
+             
         self.net_integral +=  dt * (v_desired - v)
         P = v_desired - v
         I = self.net_integral

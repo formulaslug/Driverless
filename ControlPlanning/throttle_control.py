@@ -1,4 +1,3 @@
-import numpy as np
 from config import M, R_WHEEL, T_GEARBOX, C_DRAG, P_AIR, A_FRONT, C_R1, J_E
 
 def torque_load(c_drag, p_air, A_front, c_r1, r_eff, GR,  v):
