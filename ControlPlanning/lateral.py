@@ -20,6 +20,8 @@ class Lateral():
         Retries curvature using alpha(angle from vehichle heading to lookahead vector), and the lookahead vector distance.
         Also able to pass in radius of curve as R
         """
+        if l_d == 0:
+            return 0
         if R != 0:
             return 1 / R
         else:
