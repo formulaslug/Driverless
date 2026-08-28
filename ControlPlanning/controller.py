@@ -1,16 +1,15 @@
 from longitudinal import Longitudinal
 from lateral import Lateral
-from vehichle_dynamics import ThrottleControl
-from vehichle_dynamics import SteeringControl
-import sys
-import os
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from PathPlanning.path_planner import plan_path
+from throttle_steering_control import ThrottleControl
+from throttle_steering_control import SteeringControl
 
 """
 INPUTS:
 - Waypoints in smooth_path
-- current x, y, yaw, v  
+- current x, y, yaw, v 
+- config params for longitudinal and lateral controllers
+OUTPUTS:
+- throttle, brake, steering actuator output 
 """
 
 class Controller:
@@ -23,7 +22,7 @@ class Controller:
     def update(self, x, y, yaw, v, t, v_desired, waypoints):
         a_des = self.longitudinal.update(v, v_desired, t)
         throttle_output, brake_output = self.throttle_control.accel_to_throttle_brake(a_des, v)
-        steer_output = self.steering_control(self.lateral.update(waypoints, x, y, yaw, v))
+        steer_output = self.steering_control.delta_to_actuator(self.lateral.update(waypoints, x, y, yaw, v))
         return throttle_output, brake_output, steer_output
 
 
