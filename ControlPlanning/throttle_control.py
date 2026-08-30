@@ -1,20 +1,11 @@
-from config import M, R_WHEEL, T_GEARBOX, C_DRAG, P_AIR, A_FRONT, C_R1, J_E
-
-def torque_load(c_drag, p_air, A_front, c_r1, r_eff, GR,  v):
-    F_g = 0 # flat ground, no slope
-    F_drag = 0.5 * c_drag * p_air * A_front * v ** 2
-    F_roll = c_r1 * v
-    F_load = F_g + F_drag + F_roll
-
-    T_load = F_load * r_eff * GR
-    return T_load
-
+from config import R_WHEEL, T_GEARBOX, C_DRAG, P_AIR, A_FRONT, C_R1, J_E 
+import numpy as np
 
 class ThrottleControl():
-    def __init__(self, J_e = J_E, r_eff = R_WHEEL, GR = T_GEARBOX, 
+    def __init__(self, J_E = J_E, r_eff = R_WHEEL, GR = T_GEARBOX, 
                 c_drag = C_DRAG, p_air = P_AIR, A_front = A_FRONT, c_r1 = C_R1):
 
-        self.J_e = J_e
+        self.J_E = J_E
         self.r_eff = r_eff
         self.GR = GR
 
@@ -23,16 +14,24 @@ class ThrottleControl():
         self.A_front = A_front
         self.c_r1 = c_r1
 
+    
+    def torque_load(self, v):
+        F_g = 0 # flat ground, no gravity load on horizontal plane
+        F_drag = 0.5 * self.c_drag * self.p_air * self.A_front * v ** 2
+        F_roll = self.c_r1 * v
+        F_load = F_g + F_drag + F_roll
 
-    def accel_to_throttle_brake(self, a_des, v): # velocity unused for now
-        T_load = torque_load(self.c_drag, self.p_air, self.A_front, self.c_r1, self.r_eff, self.GR, v)
+        T_load = F_load * self.r_eff * self.GR
+        return T_load
+    def accel_to_throttle_brake(self, a_des, v):
+        T_load = self.torque_load(v)
 
-        T_engine = (self.J_e/ (self.r_eff * self.GR)) * a_des + T_load
+        T_motor = (self.J_E/ (self.r_eff * self.GR)) * a_des + T_load
 
-        if T_engine >= 0:
+        if T_motor >= 0:
             brake_output = 0.0
-            throttle_output = T_engine
+            throttle_output = np.clip(T_motor, 0, 1)
         else:
-            brake_output = -T_engine
+            brake_output = -np.clip(T_motor, -1, 0)
             throttle_output = 0.0
         return throttle_output, brake_output

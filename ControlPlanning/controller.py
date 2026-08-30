@@ -21,7 +21,7 @@ class Controller:
     def update(self, x, y, yaw, v, t, v_desired, waypoints):
         a_des = self.longitudinal.update(v, v_desired, t)
         throttle_output, brake_output = self.throttle_control.accel_to_throttle_brake(a_des, v)
-        steer_output = self.steering_control.delta_to_actuator(self.lateral.update(waypoints, x, y, yaw, v))
+        steer_output = self.steering_control.delta_to_actuator(self.lateral.update(waypoints, x, y, yaw, v), max_steering_angle=30)
         return throttle_output, brake_output, steer_output
 
 

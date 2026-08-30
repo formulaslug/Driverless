@@ -1,9 +1,15 @@
+import numpy as np
+
 class Longitudinal:
     def __init__(self, K_p, K_i, K_d):
         self.t_previous = 0.0
         self.v_previous = 0.0
         self.error_previous = 0.0
+
         self.net_integral = 0.0
+        self.I_min = -10.0 #if car cant reach v des then integral will keep increasing, so we need to clamp it
+        self.I_max = 10.   # adjust during tuning, if ther ei sovershooting and slow settling clamp more
+
         self.K_p = K_p
         self.K_i = K_i
         self.K_d = K_d
@@ -13,6 +19,7 @@ class Longitudinal:
         """
         PID longitudinal algorithm, updating state variables, and desired accel
         """
+        
 
         # PID algo to compute desired accel
         if not self.intialized:
@@ -20,8 +27,9 @@ class Longitudinal:
             self.intialized = True
         else:
              dt = t - self.t_previous
-             
+
         self.net_integral +=  dt * (v_desired - v)
+        self.net_integral = max(self.I_min, min(self.I_max, self.net_integral)) #clamp
         P = v_desired - v
         I = self.net_integral
         D = ( (v_desired - v) - self.error_previous ) / dt
