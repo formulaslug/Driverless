@@ -1,5 +1,5 @@
 from config import STEERING_RATIO
-
+import numpy as np
 
 class SteeringControl():
     def __init__(self):
