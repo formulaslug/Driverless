@@ -20,5 +20,9 @@ C_DRAG = 0.3 #drag coefficient
 P_AIR = 1.225 #air density
 A_FRONT = 2.2 #frontal area
 C_R1 = 0.01 #rolling resistance coefficient
-J_E = 1.0 #motor rotational inertia
+J_M = 1.0 #electric motor rotational moment inertia
+J_WHEEL = 1  # wheel rotational moment inertia
+
+J_E = J_M + (T_GEARBOX ** 2) * J_WHEEL + M * (R_WHEEL * T_GEARBOX) ** 2 #computed total effective rotational inertia of the vehicle
+
 
