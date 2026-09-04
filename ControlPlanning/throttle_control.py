@@ -1,3 +1,6 @@
+# not currently used in controller
+
+
 from config import R_WHEEL, T_GEARBOX, C_DRAG, P_AIR, A_FRONT, C_R1, J_E 
 import numpy as np
 

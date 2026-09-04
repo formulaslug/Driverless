@@ -11,8 +11,11 @@ WHEELBASE = 1.5
 MIN_LOOKAHEAD = 2.0
 
 
-#vd
-STEERING_RATIO = 5.0
+
+
+STEERING_RATIO = 6.49
+
+#vd, not filled in correctly, but also not used in current implementation of controller
 M = 1.0 #total vehichle + driver mass
 R_WHEEL = 1.0 #rear wheel radius
 T_GEARBOX = 1.0 #Gearbox reduction ratio
