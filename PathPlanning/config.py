@@ -21,3 +21,11 @@ SPLINE_NUM_POINTS = 100        # Number of points in smoothed output path
 
 # Validation Parameters
 MIN_CONES_FOR_VALID_PATH = 4  # Minimum cones needed to plan a path
+
+# Cone Labelling
+CONE_COLOR_UNKNOWN = -1       # Label for cones whose best color is below MIN_COLOR_CONFIDENCE
+MIN_COLOR_CONFIDENCE = 0.4    # Below this the color is treated as unknown (uniform probabilities are 0.25)
+ORANGE_NEIGHBOR_RADIUS = 6.0  # Orange cones take the side of the nearest blue/yellow cone within this distance (m)
+
+# Cost Function Parameters
+MAX_CONE_TO_PATH_DISTANCE = 5.0  # Cones farther than this from a path are ignored when scoring it (m)

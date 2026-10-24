@@ -1,0 +1,13 @@
+{
+  "width": 640,
+  "height": 270,
+  "fov": 76,
+  "fx": null,
+  "fy": null,
+  "cx": null,
+  "cy": null,
+  "cameraHeight": 0.7,
+  "cameraPitchDeg": 0.0,
+  "cameraOffsetX": 0.0,
+  "cameraOffsetY": 0.0
+}

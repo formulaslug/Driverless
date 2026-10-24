@@ -22,8 +22,8 @@ class PlanningNode(Node):
         smoothPath, curvature = None, None
         plannerInput = coneFilterToPathPlannerInput(message.cones)
         if plannerInput is not None:
-            positions, coordinateConfidence, colors = plannerInput
+            positions, coordinateUncertainty, colors = plannerInput
             smoothPath, curvature = plan_path(
-                positions, coordinateConfidence, colors, np.array([0.0, 0.0]), 0.0
+                positions, coordinateUncertainty, colors, np.array([0.0, 0.0]), 0.0
             )
         return PathMessage(frameId=message.frameId, smoothPath=smoothPath, curvature=curvature)

@@ -12,10 +12,26 @@ class Graph:
         for node in self.nodes:
             node.start()
 
+    def stop(self):
+        for node in self.nodes:
+            node.stopEvent.set()
+
     def join(self):
         for node in self.nodes:
-            node.join()
+            while node.thread.is_alive():
+                node.thread.join(timeout=0.5)
 
+    # Ctrl-C stops the sources and lets the remaining frames drain.
     def run(self):
         self.start()
-        self.join()
+        try:
+            self.join()
+        except KeyboardInterrupt:
+            print("Interrupted; draining pipeline...")
+            self.stop()
+            while True:
+                try:
+                    self.join()
+                    break
+                except KeyboardInterrupt:
+                    print("Still draining; waiting for the video to finalize...")

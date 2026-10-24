@@ -4,8 +4,11 @@ import argparse
 
 def checkMpsAvailability():
     """
-    Check if MPS (Metal Performance Shaders) is available for M-series acceleration
+    Pick the best available training device: CUDA, then MPS (M-series), then CPU
     """
+    if torch.cuda.is_available():
+        print("CUDA is available and will be used for training")
+        return 0
     if torch.backends.mps.is_available():
         print("MPS (Apple Silicon GPU) is available and will be used for training")
         return 'mps'

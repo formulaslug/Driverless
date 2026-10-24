@@ -8,7 +8,7 @@ def runInference(weightsPath, sourcePath, confThreshold=0.25, saveResults=True, 
     """
     Run YOLOv8 segmentation inference on a single image
     """
-    device = 'mps' if torch.backends.mps.is_available() else 'cpu'
+    device = 'cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'
     print(f"Loading model from {weightsPath}")
     print(f"Using device: {device}")
 

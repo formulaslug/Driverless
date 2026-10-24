@@ -7,12 +7,7 @@ class FrameMessage:
     frameId: int
     frameName: str
     image: np.ndarray
-    cameraIntrinsics: dict
-
-@dataclass
-class DepthMessage:
-    frameId: int
-    depthMap: np.ndarray
+    camera: object
 
 @dataclass
 class SegmentationMessage:
@@ -24,14 +19,6 @@ class SegmentationMessage:
     numDetections: int
 
 @dataclass
-class CalibrationMessage:
-    frameId: int
-    calibratedScale: float
-    planeParams: Optional[np.ndarray]
-    inlierRatio: float
-    inlierMask: Optional[np.ndarray]
-
-@dataclass
 class ConeDistancesMessage:
     frameId: int
     coneDistances: list
@@ -41,7 +28,6 @@ class ConeMapMessage:
     frameId: int
     cones: list
     coneMap: list
-    filterRef: object
 
 @dataclass
 class PathMessage:
@@ -56,8 +42,7 @@ class OdometryMessage:
     dy: float
     dyaw: float
 
-# Future IMU input contract. The motion interface accepts these once real
-# sensor data is available; unused by the visual estimator today.
+# IMU input contract. ImuMotionEstimator accepts these once real sensor data is available.
 @dataclass
 class ImuSample:
     timestamp: float
@@ -65,7 +50,9 @@ class ImuSample:
     gyro: np.ndarray
     mag: Optional[np.ndarray] = None
 
+# Emitted by a node whose process() raised so join nodes and reorder buffers can
+# discard the frame instead of waiting on it forever.
 @dataclass
-class AnnotatedFrameMessage:
+class FailedFrameMessage:
     frameId: int
-    image: np.ndarray
+    source: str

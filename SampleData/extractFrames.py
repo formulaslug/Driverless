@@ -7,7 +7,7 @@ targetFps = 10
 
 cap = cv2.VideoCapture(videoPath)
 videoFps = cap.get(cv2.CAP_PROP_FPS)
-frameInterval = int(videoFps / targetFps)
+frameInterval = max(1, round(videoFps / targetFps))
 
 os.makedirs(outputFolder, exist_ok=True)
 

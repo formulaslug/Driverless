@@ -10,6 +10,7 @@ from track_generator import TrackGenerator
 from utils import Mode, SimType
 import yaml
 import os
+import track_generator
 
 # Performance constraint from CLAUDE.md
 TARGET_CYCLE_TIME_MS = 40  # 25 Hz requirement
@@ -163,9 +164,11 @@ class TestVisualization:
         ax.legend()
         ax.grid(True, alpha=0.3)
         ax.set_title('Test Straight Track')
-        plt.show()
+        plt.close(fig)
+        assert smooth_path is not None
     
-    def test_visualize_generated_track(self):
+    def test_visualize_generated_track(self, tmp_path, monkeypatch):
+        np.random.seed(0)
         # Configure track generation
         track_gen = TrackGenerator(
             n_points=60,           # Voronoi points
@@ -180,10 +183,12 @@ class TestVisualization:
             sim_type=SimType.FSSIM
         )
 
-        track_gen.create_track()
+        # the generator writes next to its own source file; redirect that to tmp_path
+        with monkeypatch.context() as patch:
+            patch.setattr(track_generator.os.path, 'realpath', lambda path: str(tmp_path))
+            track_gen.create_track()
 
-        # Open and read the YAML file
-        yaml_path = os.path.join(os.path.dirname(__file__), 'random_track.yaml')
+        yaml_path = os.path.join(str(tmp_path), 'random_track.yaml')
         with open(yaml_path, 'r') as file:
             data = yaml.safe_load(file)
 
@@ -221,4 +226,5 @@ class TestVisualization:
         ax.legend()
         ax.grid(True, alpha=0.3)
         ax.set_title('Track visualization')
-        plt.show()
+        plt.close(fig)
+        assert smooth_path is not None

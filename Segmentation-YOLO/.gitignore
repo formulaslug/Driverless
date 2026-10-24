@@ -1,0 +1,16 @@
+dataset/
+runs/
+*.pt
+*.pth
+*.onnx
+*.torchscript
+*.engine
+__pycache__/
+*.py[cod]
+*$py.class
+.DS_Store
+.ipynb_checkpoints/
+*.log
+wandb/
+.vscode/
+.idea/
