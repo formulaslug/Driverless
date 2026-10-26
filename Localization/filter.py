@@ -24,7 +24,8 @@ class ConeFilter:
                  mahalanobisThreshold=3.0,
                  colorMatchThreshold=0.2,
                  maxAge=10,
-                 useMahalanobis=True):
+                 useMahalanobis=True,
+                 behindCarMargin=5.0):
         self.xMovementUncertainty = xMovementUncertainty
         self.yMovementUncertainty = yMovementUncertainty
         self.deltaYawUncertainty = deltaYawUncertainty
@@ -35,6 +36,7 @@ class ConeFilter:
         self.colorMatchThreshold = colorMatchThreshold
         self.maxAge = maxAge
         self.useMahalanobis = useMahalanobis
+        self.behindCarMargin = behindCarMargin
 
         self.cones = []
 
@@ -48,6 +50,13 @@ class ConeFilter:
 
         dxRot = dx * cosYaw - dy * sinYaw
         dyRot = dx * sinYaw + dy * cosYaw
+
+        # Odometry uncertainty is a fraction of the motion actually reported, so a
+        # stationary car adds no process noise.
+        travelled = np.hypot(dx, dy)
+        Qtranslation = np.array([[(self.xMovementUncertainty * travelled)**2, 0.0],
+                                 [0.0, (self.yMovementUncertainty * travelled)**2]])
+        yawSigma = self.deltaYawUncertainty * abs(dyaw)
 
         for cone in self.cones:
             xRot = cone.x * cosYaw - cone.y * sinYaw
@@ -65,14 +74,11 @@ class ConeFilter:
                 tangentX = -np.sin(angle)
                 tangentY = np.cos(angle)
                 tangent = np.array([[tangentX], [tangentY]])
-                Qyaw = (dist * self.deltaYawUncertainty)**2 * (tangent @ tangent.T)
+                Qyaw = (dist * yawSigma)**2 * (tangent @ tangent.T)
             else:
                 Qyaw = np.zeros((2, 2))
 
-            Q = np.array([[self.xMovementUncertainty**2, 0.0],
-                         [0.0, self.yMovementUncertainty**2]]) + Qyaw
-
-            cone.cov = covRotated + Q
+            cone.cov = covRotated + Qtranslation + Qyaw
 
     def normalizeColorConfidences(self, colorConfidences):
         total = sum(colorConfidences)
@@ -91,25 +97,14 @@ class ConeFilter:
             return -1
         return colorConfidences.index(maxConf)
 
+    # Small and large orange are one class for matching purposes.
+    def foldColors(self, colorConfidences):
+        normalized = self.normalizeColorConfidences(colorConfidences)
+        return [normalized[0], normalized[1], normalized[2] + normalized[3]]
+
     def areColorsCompatible(self, colorConf1, colorConf2):
-        similarity = self.colorConfidenceSimilarity(colorConf1, colorConf2)
-
-        if similarity >= self.colorMatchThreshold:
-            return True
-
-        class1 = self.getDominantClass(colorConf1)
-        class2 = self.getDominantClass(colorConf2)
-
-        if class1 == -1 or class2 == -1:
-            return True
-
-        if class1 == class2:
-            return True
-
-        if (class1 == 2 and class2 == 3) or (class1 == 3 and class2 == 2):
-            return True
-
-        return False
+        similarity = self.colorConfidenceSimilarity(self.foldColors(colorConf1), self.foldColors(colorConf2))
+        return similarity >= self.colorMatchThreshold
 
     def matchDetections(self, detections):
         if len(detections) == 0 or len(self.cones) == 0:
@@ -171,7 +166,8 @@ class ConeFilter:
         cone.x += update[0]
         cone.y += update[1]
 
-        cone.cov = (np.eye(2) - K) @ cone.cov
+        IminusK = np.eye(2) - K
+        cone.cov = IminusK @ cone.cov @ IminusK.T + K @ R @ K.T
 
         alpha = 1.0 / (cone.numObservations + 1)
         fusedConfidences = [
@@ -203,7 +199,8 @@ class ConeFilter:
 
         self.addNewCones(unmatchedDetections)
 
-        self.cones = [cone for cone in self.cones if cone.age <= self.maxAge]
+        self.cones = [cone for cone in self.cones
+                      if cone.age <= self.maxAge and cone.x > -self.behindCarMargin]
 
     def visualize(self, savePath=None, showPlot=True, plannedPath=None):
         fig, ax = plt.subplots(figsize=(10, 10))

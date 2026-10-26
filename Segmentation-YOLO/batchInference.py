@@ -8,7 +8,7 @@ def runBatchInference(weightsPath, sourceDir, confThreshold=0.25, saveResults=Tr
     """
     Run YOLOv8 segmentation inference on multiple images
     """
-    device = 'mps' if torch.backends.mps.is_available() else 'cpu'
+    device = 'cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'
     print(f"Loading model from {weightsPath}")
     print(f"Using device: {device}")
 

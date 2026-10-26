@@ -9,74 +9,48 @@
 
 import numpy as np
 import config as cfg
+from cone_labels import boundary_sides
 from scipy.spatial.distance import pdist, squareform
 
 TARGET_PATH_LENGTH = 15.0   # desired horizon
 BIG_COST = 1e9
 
 def assign_cones_to_segments(path, cones):
-    n_cones = len(cones)
-    n_segments = len(path) - 1
-    
-    # create np arrays for the distances and cross products of each cone to each segment
-    distances = np.zeros((n_cones, n_segments))
-    cross_products = np.zeros((n_cones, n_segments))
-    
-    for idx in range(n_segments):
-        A = path[idx]   # first segment waypoint
-        B = path[idx + 1]   # second segment waypoint
-        vec_AB = B - A
-        seg_len_sq = np.dot(vec_AB, vec_AB) # squared length of the segment
-        
-        if seg_len_sq < 1e-10:  # segment length too small
-            distances[:, idx] = np.inf
-            cross_products[:, idx] = 0
-            continue
-        
-        vec_AC = cones - A # shape: (n_cones, 2)
-        t = np.dot(vec_AC, vec_AB) / seg_len_sq
-        
-        # only keep cones with t values between [0,1]
-        valid_mask = (t>=0) & (t<=1) # boolean array
-        
-        # initialize with large distances to filter out invalid cones
-        distances[:, idx] = np.inf
-        cross_products[:, idx] = 0
-        
-        if np.any(valid_mask):
-            valid_t = t[valid_mask]
-            valid_cones = cones[valid_mask]
-            valid_AC = vec_AC[valid_mask]
-            
-            # calculates the closest point on the segment for each cone
-            projections = A + valid_t[:, np.newaxis] * vec_AB
-            # calculate distances between each cone and its projection point
-            distances[valid_mask, idx] = np.linalg.norm(valid_cones - projections, axis=1)
-            # calculate cross product to find which side the cone is on
-            cross_products[valid_mask, idx] = vec_AB[0] * valid_AC[:, 1] - vec_AB[1] * valid_AC[:, 0]
-        
-    # assign each cone to its closest segment
+    # returns (segment_assignments, side_assignments); cones farther than
+    # MAX_CONE_TO_PATH_DISTANCE from every segment get segment -1 and side 0
+    path = np.asarray(path, float)
+    cones = np.asarray(cones, float)
+
+    starts = path[:-1]
+    vec_AB = path[1:] - starts                              # (n_segments, 2)
+    seg_len_sq = np.sum(vec_AB**2, axis=1)
+    degenerate = seg_len_sq < 1e-10
+
+    vec_AC = cones[:, np.newaxis, :] - starts[np.newaxis]   # (n_cones, n_segments, 2)
+    t = np.sum(vec_AC * vec_AB[np.newaxis], axis=2) / np.where(degenerate, 1.0, seg_len_sq)
+    t = np.clip(t, 0.0, 1.0)
+
+    projections = starts[np.newaxis] + t[:, :, np.newaxis] * vec_AB[np.newaxis]
+    distances = np.linalg.norm(cones[:, np.newaxis, :] - projections, axis=2)
+    distances[:, degenerate] = np.inf
+
+    # positive cross product: cone is on the left of the segment
+    cross_products = vec_AB[np.newaxis, :, 0] * vec_AC[:, :, 1] - vec_AB[np.newaxis, :, 1] * vec_AC[:, :, 0]
+
+    rows = np.arange(len(cones))
     segment_assignments = np.argmin(distances, axis=1)
-    # create empty array to assign sides to each cone
-    side_assignments = np.zeros(n_cones, dtype=int)
-    
-    for i in range(n_cones):
-        seg = segment_assignments[i]
-        cross = cross_products[i, seg]
-        
-        if cross > 1e-6:
-            side_assignments[i] = 1 # cone is on the left side of the segment
-        elif cross < -1e-6:
-            side_assignments[i] = -1 # cone is on the right side of the segment
-        else:
-            side_assignments[i] = 0 # cone could be on the line
-    
+    unassigned = distances[rows, segment_assignments] > cfg.MAX_CONE_TO_PATH_DISTANCE
+
+    cross = cross_products[rows, segment_assignments]
+    side_assignments = np.where(cross > 1e-6, 1, np.where(cross < -1e-6, -1, 0))
+    side_assignments[unassigned] = 0
+    segment_assignments[unassigned] = -1
+
     return segment_assignments, side_assignments
-        
+
 def count_boundary_violations(cone_colors, side_assignments):
-    # filter out orange cones and cones that do not have a left or right side assignment
-    valid_mask = (cone_colors != cfg.CONE_COLOR_ORANGE_SMALL) & \
-                    (cone_colors != cfg.CONE_COLOR_ORANGE_LARGE) & \
+    # only blue/yellow boundary cones with a left or right side assignment count
+    valid_mask = np.isin(cone_colors, [cfg.CONE_COLOR_BLUE, cfg.CONE_COLOR_YELLOW]) & \
                     (side_assignments != 0)
                     
     expected_sides = np.zeros_like(cone_colors, dtype=int)
@@ -86,26 +60,28 @@ def count_boundary_violations(cone_colors, side_assignments):
     mismatches = (expected_sides != side_assignments) & valid_mask
     return int(np.sum(mismatches))
 
-def calculate_boundary_violation(path, cones, colors):   
-    cone_colors = np.argmax(colors, axis=1)
-    segment_assignments, side_assignments = assign_cones_to_segments(path, cones)
-    violations = count_boundary_violations(cone_colors, side_assignments)
-    
-    non_orange_mask = (cone_colors != cfg.CONE_COLOR_ORANGE_SMALL) & \
-                      (cone_colors != cfg.CONE_COLOR_ORANGE_LARGE)
-    n_non_orange = np.sum(non_orange_mask)
+def calculate_boundary_violation(path, cones, colors, assignments=None):
+    boundaries = boundary_sides(cones, colors)
+    if assignments is None:
+        assignments = assign_cones_to_segments(path, cones)
+    segment_assignments, side_assignments = assignments
+    violations = count_boundary_violations(boundaries, side_assignments)
 
-    if n_non_orange == 0:
+    n_scored = np.sum(np.isin(boundaries, [cfg.CONE_COLOR_BLUE, cfg.CONE_COLOR_YELLOW]) & (side_assignments != 0))
+
+    if n_scored == 0:
         return 0.0
 
-    return float(violations) / float(n_non_orange)
+    return float(violations) / float(n_scored)
 
-def calculate_trackwidth_variance(path, cones, colors):
+def calculate_trackwidth_variance(path, cones, colors, assignments=None):
     if colors is None or len(colors) == 0:
         return 0.0
 
-    cone_colors = np.argmax(colors, axis=1)
-    segment_assignments, side_assignments = assign_cones_to_segments(path, cones)
+    cone_colors = boundary_sides(cones, colors)
+    if assignments is None:
+        assignments = assign_cones_to_segments(path, cones)
+    segment_assignments, side_assignments = assignments
 
     n_segments = len(path) - 1
     widths = []
@@ -185,15 +161,16 @@ def evaluate_path_cost(path, cones, coordinate_confidence, colors=None):
         angle_metric = 0.0
         smoothness_metric = 0.0
 
-    # cone spacing metric (using scipy for efficiency)
-    if len(cones) > 1:
-        # Compute pairwise distances efficiently
-        dist_matrix = squareform(pdist(cones))  # shape: (n_cones, n_cones)
-        np.fill_diagonal(dist_matrix, np.inf)  # Ignore self-distances
+    # cones close enough to this path to be scored against it
+    segment_assignments, side_assignments = assign_cones_to_segments(path, cones)
+    near_mask = segment_assignments >= 0
+    near_cones = cones[near_mask]
 
-        # Find nearest neighbor distance for each cone
-        nn_dist = np.min(dist_matrix, axis=1)
-        spacing_metric = float(np.var(nn_dist))
+    # cone spacing metric: evenness of nearest-neighbor distances along the path
+    if len(near_cones) > 2:
+        dist_matrix = squareform(pdist(near_cones))
+        np.fill_diagonal(dist_matrix, np.inf)
+        spacing_metric = float(np.var(np.min(dist_matrix, axis=1)))
     else:
         spacing_metric = 0.0
 
@@ -201,9 +178,9 @@ def evaluate_path_cost(path, cones, coordinate_confidence, colors=None):
     color_metric = 0.0
     if colors is not None:
         colors = np.asarray(colors, float)
-        if colors.shape[0] == cones.shape[0]:
-            p_best = np.max(colors, axis=1)   # most likely color
-            wrong_p = 1.0 - p_best           # chance of being wrong
+        if colors.shape[0] == cones.shape[0] and np.any(near_mask):
+            p_best = np.max(colors[near_mask], axis=1)   # most likely color
+            wrong_p = 1.0 - p_best                       # chance of being wrong
             color_metric = float(np.mean(wrong_p)**2)
 
     # length metric
@@ -211,63 +188,39 @@ def evaluate_path_cost(path, cones, coordinate_confidence, colors=None):
     total_length = float(np.sum(seg_lengths))
     length_metric = (total_length - TARGET_PATH_LENGTH) ** 2
 
-    # track width variance metric
+    # track width variance and track boundary metrics
+    trackwidth_metric = 0.0
+    boundary_violation_metric = 0.0
     if colors is not None:
-        trackwidth_metric = calculate_trackwidth_variance(path, cones, colors)
-    else:
-        trackwidth_metric = 0.0
+        assignments = (segment_assignments, side_assignments)
+        trackwidth_metric = calculate_trackwidth_variance(path, cones, colors, assignments)
+        boundary_violation_metric = calculate_boundary_violation(path, cones, colors, assignments)
 
-    # track boundary metric
-    if colors is not None:
-        boundary_violation_metric = calculate_boundary_violation(path, cones, colors)
-    else:
-        boundary_violation_metric = 0.0
-        
-    # coordinate confidence metric
+    # coordinate confidence metric: mean positional uncertainty radius of scored cones
     coord_conf_metric = 0.0
     if coordinate_confidence is not None:
         coordinate_confidence = np.asarray(coordinate_confidence, float)
-        if len(coordinate_confidence) == len(cones):
-            # compute minimum distance from each cone to any path segment
-            n_segments = len(path) - 1
-            min_cone_dist = np.full(len(cones), np.inf)
-            for idx in range(n_segments):
-                A = path[idx]
-                B = path[idx + 1]
-                vec_AB = B - A
-                seg_len_sq = np.dot(vec_AB, vec_AB)
-                if seg_len_sq < 1e-10:
-                    continue
-                vec_AC = cones - A
-                t = np.clip(np.dot(vec_AC, vec_AB) / seg_len_sq, 0, 1)
-                proj = A + t[:, np.newaxis] * vec_AB
-                dist = np.linalg.norm(cones - proj, axis=1)
-                min_cone_dist = np.minimum(min_cone_dist, dist)
+        if len(coordinate_confidence) == len(cones) and np.any(near_mask):
+            coord_conf_metric = float(np.mean(coordinate_confidence[near_mask]) ** 2)
 
-            # only consider cones within 2x track width of the path
-            near_mask = min_cone_dist < 6.0
-            if np.any(near_mask):
-                # mean probability radius of nearby cones
-                coord_conf_metric = float(np.mean(coordinate_confidence[near_mask]) ** 2)
-
-# normalization constants (expected values from AMZ paper)
+    # normalization constants (expected values from AMZ paper); every metric is
+    # a squared quantity, so it is divided by the square of its expected scale
     EXPECTED_MAX_ANGLE = np.pi / 4  # ~45 degrees max turn
-    EXPECTED_SPACING_VAR = 1.0      # ~1m variance in cone spacing
-    EXPECTED_TRACKWIDTH_VAR = 0.5   # ~0.5m variance in track width (should be consistent ~3m)
+    EXPECTED_SPACING_VAR = 1.0      # ~1m^2 variance in cone spacing
+    EXPECTED_TRACKWIDTH_VAR = 0.5   # ~0.5m^2 variance in track width (should be consistent ~3m)
     EXPECTED_COLOR_UNCERTAINTY = 0.25  # 25% average uncertainty
     EXPECTED_LENGTH_DEV = 2.0       # ~2m deviation from target
     EXPECTED_COORD_RADIUS = 0.5     # ~0.5m average positional uncertainty
 
-# normalized metrics
-    norm_angle = angle_metric / EXPECTED_MAX_ANGLE
-    norm_smoothness = smoothness_metric / EXPECTED_MAX_ANGLE
+    norm_angle = angle_metric / EXPECTED_MAX_ANGLE**2
+    norm_smoothness = smoothness_metric / EXPECTED_MAX_ANGLE**2
     norm_spacing = spacing_metric / EXPECTED_SPACING_VAR
     norm_trackwidth = trackwidth_metric / EXPECTED_TRACKWIDTH_VAR
-    norm_color = color_metric / EXPECTED_COLOR_UNCERTAINTY 
-    norm_length = length_metric / EXPECTED_LENGTH_DEV 
-    norm_coord = coord_conf_metric / EXPECTED_COORD_RADIUS
+    norm_color = color_metric / EXPECTED_COLOR_UNCERTAINTY**2
+    norm_length = length_metric / EXPECTED_LENGTH_DEV**2
+    norm_coord = coord_conf_metric / EXPECTED_COORD_RADIUS**2
 
-# total cost
+    # total cost
     cost = (
         2.5 * norm_angle           # qc: penalize sharp turns
         + 1.5 * norm_smoothness    # curve smoothness

@@ -1,0 +1,9 @@
+{
+  "coneHeights": {
+    "seg_orange_cone": 0.325,
+    "seg_yellow_cone": 0.325,
+    "seg_large_orange_cone": 0.505,
+    "seg_blue_cone": 0.325,
+    "seg_unknown_cone": 0.325
+  }
+}

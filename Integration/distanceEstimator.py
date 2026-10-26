@@ -1,60 +1,24 @@
 import json
-import numpy as np
 import os
+import numpy as np
 
+pixelSigma = 2.0
+pitchSigmaRad = np.radians(0.5)
+borderMargin = 2
+maxRange = 100.0
+disagreementSigmas = 3.0
+defaultConeHeight = 0.325
+
+# Per-cone position from a pinhole camera: bbox height gives depth along the
+# optical axis, and the base pixel's ray against the flat road gives a second
+# estimate. The two are fused by inverse variance, falling back to the lower
+# variance one when they disagree.
 class DistanceEstimator:
-    def __init__(self, cameraConfigPath=None, coneConfigPath=None, cameraIntrinsics=None):
+    def __init__(self, camera, coneConfigPath=None):
         if coneConfigPath is None:
             coneConfigPath = os.path.join(os.path.dirname(__file__), 'cone.json')
-
+        self.camera = camera
         self.loadConeConfig(coneConfigPath)
-
-        if cameraIntrinsics is not None:
-            self.fx = cameraIntrinsics['fx']
-            self.fy = cameraIntrinsics['fy']
-            self.cx = cameraIntrinsics['cx']
-            self.cy = cameraIntrinsics['cy']
-            self.fov = cameraIntrinsics.get('fov', 120)
-            self.depthScale = cameraIntrinsics.get('depthScale', 10.0)
-        else:
-            if cameraConfigPath is None:
-                cameraConfigPath = os.path.join(os.path.dirname(__file__), 'camera.json')
-            self.loadCameraConfig(cameraConfigPath)
-
-    def loadCameraConfig(self, configPath):
-        try:
-            with open(configPath, 'r') as f:
-                config = json.load(f)
-        except FileNotFoundError:
-            raise FileNotFoundError(f"Camera config not found: {configPath}")
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON in camera config {configPath}: {e}")
-
-        self.width = config['resolution']['width']
-        self.height = config['resolution']['height']
-        self.fov = config['fov']
-        self.depthScale = config.get('depthScale', 10.0)
-
-        if self.fov <= 0 or self.fov >= 180:
-            raise ValueError(f"Invalid FOV {self.fov}: must be between 0 and 180 degrees")
-
-        if config['fx'] is not None and config['fy'] is not None:
-            self.fx = config['fx']
-            self.fy = config['fy']
-        else:
-            focalLength = self.width / (2 * np.tan(np.radians(self.fov) / 2))
-            self.fx = focalLength
-            self.fy = focalLength
-
-        if self.fx <= 0 or self.fy <= 0:
-            raise ValueError(f"Invalid focal lengths fx={self.fx}, fy={self.fy}: must be positive")
-
-        if config['cx'] is not None and config['cy'] is not None:
-            self.cx = config['cx']
-            self.cy = config['cy']
-        else:
-            self.cx = self.width / 2
-            self.cy = self.height / 2
 
     def loadConeConfig(self, configPath):
         try:
@@ -68,148 +32,76 @@ class DistanceEstimator:
         self.coneHeights = config['coneHeights']
 
     def getConeHeight(self, coneClass):
-        if isinstance(coneClass, dict):
-            className = coneClass.get('name', 'seg_unknown_cone')
-        else:
-            className = coneClass
+        className = coneClass.get('name', 'seg_unknown_cone') if isinstance(coneClass, dict) else coneClass
+        return self.coneHeights.get(className, defaultConeHeight)
 
-        return self.coneHeights.get(className, 0.228)
-
-    def estimateDistanceBbox(self, box, coneClass):
-        if len(box) != 4:
-            return None
-
+    # Returns ((x, y), sigmaX) or None. Needs the full cone height visible.
+    def estimateBbox(self, box, coneClass):
         x1, y1, x2, y2 = box
-        bboxHeight = y2 - y1
-
-        if bboxHeight <= 0:
+        pixelHeight = y2 - y1
+        if pixelHeight <= 0 or y1 <= borderMargin or y2 >= self.camera.height - 1 - borderMargin:
             return None
 
-        coneHeight = self.getConeHeight(coneClass)
-        distance = (coneHeight * self.fy) / bboxHeight
+        camera = self.camera
+        depth = self.getConeHeight(coneClass) * camera.fy * np.cos(camera.pitchRad) / pixelHeight
+        u = (x1 + x2) / 2.0
+        point = camera.pointAtDepth(u, y2, depth)
+        forwardPerDepth = camera.rayDirection(u, y2)[0]
+        sigmaX = abs(forwardPerDepth) * depth * pixelSigma / pixelHeight
+        return point, sigmaX
 
-        return distance if distance > 0 else None
-
-    def sampleDepthForBox(self, box, depthMap):
-        if len(box) != 4:
-            return None
-
-        try:
-            x1, y1, x2, y2 = map(int, box)
-        except (ValueError, TypeError):
-            return None
-
-        H, W = depthMap.shape
-        x1 = max(0, x1)
-        y1 = max(0, y1)
-        x2 = min(W, x2)
-        y2 = min(H, y2)
-
-        width = x2 - x1
-        height = y2 - y1
-
-        if width <= 0 or height <= 0:
-            return None
-
-        marginX = int(width * 0.33)
-        marginY = int(height * 0.33)
-
-        innerX1 = max(x1, min(x1 + marginX, x2))
-        innerX2 = max(x1, min(x2 - marginX, x2))
-        innerY1 = max(y1, min(y1 + marginY, y2))
-        innerY2 = max(y1, min(y2 - marginY, y2))
-
-        if innerX2 <= innerX1 or innerY2 <= innerY1:
-            return None
-
-        depthRegion = depthMap[innerY1:innerY2, innerX1:innerX2]
-        validDepths = depthRegion[(depthRegion > 0) & np.isfinite(depthRegion)]
-
-        if len(validDepths) == 0:
-            return None
-
-        meanDisparity = float(np.mean(validDepths))
-        return meanDisparity if meanDisparity != 0 else None
-
-    def estimateDistanceDepthMap(self, box, depthMap, depthScale=None):
-        # depthMap is metric depth in meters; return mean depth directly
-        meanDepth = self.sampleDepthForBox(box, depthMap)
-        return meanDepth
-
-    def calibrateDepthScale(self, boxes, classes, depthMap):
-        # No-op: depth map is already metric
-        return 1.0
-
-    def estimateDistanceGroundPlane(self, box, planeParams):
-        if planeParams is None or len(planeParams) != 4:
-            return None
-
-        if self.fx == 0 or self.fy == 0:
-            return None
-
+    # Returns ((x, y), sigmaX) or None. Needs the cone base visible.
+    def estimateGround(self, box):
         x1, y1, x2, y2 = box
-        a, b, c, d = planeParams
-
-        u = (x1 + x2) / 2
-        v = y2
-
-        xNorm = (u - self.cx) / self.fx
-        yNorm = (v - self.cy) / self.fy
-
-        denominator = a * xNorm + b * yNorm + c
-
-        if abs(denominator) < 1e-6:
+        if y2 >= self.camera.height - 1 - borderMargin:
             return None
 
-        distance = d / denominator
+        camera = self.camera
+        u = (x1 + x2) / 2.0
+        point = camera.groundPoint(u, y2)
+        if point is None or point[0] <= 0 or point[0] > maxRange:
+            return None
 
-        return distance if distance > 0 else None
+        samples = [camera.groundPoint(u, y2 + pixelSigma),
+                   camera.groundPoint(u, y2, camera.pitchRad + pitchSigmaRad)]
+        deviations = [abs(s[0] - point[0]) if s is not None else maxRange for s in samples]
+        return point, float(np.hypot(*deviations))
 
-    def estimateDistance(self, box, coneClass, depthMap, planeParams, depthScale=None):
-        weights = [1/3, 1/3, 1/3]
+    def fuse(self, bbox, ground):
+        if bbox is None and ground is None:
+            return None
+        if bbox is None or ground is None:
+            return (bbox or ground)[0]
 
-        distBbox = self.estimateDistanceBbox(box, coneClass)
-        distDepth = self.estimateDistanceDepthMap(box, depthMap, depthScale=depthScale)
-        distPlane = self.estimateDistanceGroundPlane(box, planeParams)
+        (bboxPoint, bboxSigma), (groundPoint, groundSigma) = bbox, ground
+        gap = abs(bboxPoint[0] - groundPoint[0])
+        if gap > disagreementSigmas * np.hypot(bboxSigma, groundSigma):
+            return bboxPoint if bboxSigma <= groundSigma else groundPoint
 
-        distances = [distBbox, distDepth, distPlane]
-        validDistances = []
-        validWeights = []
+        bboxWeight = 1.0 / max(bboxSigma, 1e-6) ** 2
+        groundWeight = 1.0 / max(groundSigma, 1e-6) ** 2
+        total = bboxWeight + groundWeight
+        return (
+            (bboxWeight * bboxPoint[0] + groundWeight * groundPoint[0]) / total,
+            (bboxWeight * bboxPoint[1] + groundWeight * groundPoint[1]) / total,
+        )
 
-        for d, w in zip(distances, weights):
-            if d is not None and d > 0 and np.isfinite(d):
-                validDistances.append(d)
-                validWeights.append(w)
+    def estimateCone(self, box, coneClass):
+        bbox = self.estimateBbox(box, coneClass)
+        ground = self.estimateGround(box)
+        fused = self.fuse(bbox, ground)
 
-        if not validDistances:
-            return None, distances
+        valid = fused is not None and fused[0] > 0 and np.isfinite(fused[0]) and np.isfinite(fused[1])
+        return {
+            'x': float(fused[0]) if valid else None,
+            'y': float(fused[1]) if valid else None,
+            'distance': float(fused[0]) if valid else None,
+            'bboxDistance': bbox[0][0] if bbox else None,
+            'groundDistance': ground[0][0] if ground else None,
+            'class': coneClass,
+        }
 
-        totalWeight = sum(validWeights)
-        if totalWeight == 0:
-            return None, distances
-
-        finalDistance = sum(d * w for d, w in zip(validDistances, validWeights)) / totalWeight
-
-        return finalDistance, distances
-
-    def estimateAllCones(self, boxes, classes, depthMap, planeParams, depthScale=None):
+    def estimateAllCones(self, boxes, classes):
         if boxes is None or len(boxes) == 0:
             return []
-
-        coneDistances = []
-
-        for i in range(len(boxes)):
-            box = boxes[i]
-            coneClass = classes[i]
-
-            distance, methodDistances = self.estimateDistance(box, coneClass, depthMap, planeParams, depthScale=depthScale)
-
-            coneDistances.append({
-                'distance': distance,
-                'bboxDistance': methodDistances[0],
-                'depthMapDistance': methodDistances[1],
-                'groundPlaneDistance': methodDistances[2],
-                'class': coneClass
-            })
-
-        return coneDistances
+        return [self.estimateCone(boxes[i], classes[i]) for i in range(len(boxes))]

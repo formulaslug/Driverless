@@ -22,33 +22,23 @@ def classToColorConfidences(className, detectionConfidence):
             confidences[i] = remainder
     return confidences
 
-def perceptionToDetections(boxes, classes, confidences, coneDistances, cameraIntrinsics):
+def perceptionToDetections(boxes, classes, confidences, coneDistances):
     # Converts perception output into ConeFilter-format detections
     # Returns list of (xVeh, yVeh, blueConf, yellowConf, sOrangeConf, lOrangeConf)
     if boxes is None or len(boxes) == 0:
         return []
 
-    fx = cameraIntrinsics['fx']
-    cx = cameraIntrinsics['cx']
-
     detections = []
     for i in range(len(boxes)):
-        distance = coneDistances[i]['distance']
-        if distance is None or distance <= 0 or not np.isfinite(distance):
+        x, y = coneDistances[i]['x'], coneDistances[i]['y']
+        if x is None or y is None or x <= 0 or not np.isfinite(x) or not np.isfinite(y):
             continue
-
-        x1, y1, x2, y2 = boxes[i]
-        u = (x1 + x2) / 2.0
-
-        # Back-project to vehicle frame (camera Z = vehicle X forward, camera -X = vehicle Y left)
-        xVeh = distance
-        yVeh = -((u - cx) / fx) * distance
 
         className = classes[i]['name'] if isinstance(classes[i], dict) else classes[i]
         conf = float(confidences[i]) if confidences is not None else 0.5
         colorConfs = classToColorConfidences(className, conf)
 
-        detections.append((xVeh, yVeh, *colorConfs))
+        detections.append((x, y, *colorConfs))
 
     return detections
 
@@ -57,7 +47,7 @@ def coneFilterToPathPlannerInput(cones):
         return None
 
     positions = np.array([[cone.x, cone.y] for cone in cones])
-    coordinateConfidence = np.array([np.sqrt(np.trace(cone.cov) / 2) for cone in cones])
+    coordinateUncertainty = np.array([np.sqrt(np.trace(cone.cov) / 2) for cone in cones])
     colors = np.array([cone.colorConfidences for cone in cones])
 
-    return positions, coordinateConfidence, colors
+    return positions, coordinateUncertainty, colors

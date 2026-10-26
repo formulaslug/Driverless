@@ -2,6 +2,7 @@ from scipy.spatial import Delaunay
 from collections import defaultdict
 import numpy as np
 import config as cfg
+from cone_labels import boundary_sides
 from numpy.typing import ArrayLike
 from typing import Tuple, Dict, Set
 
@@ -11,7 +12,15 @@ def get_midpoints(cones: ArrayLike, colors) -> Tuple[np.ndarray, Dict[Tuple[floa
 
     Returns waypoints (midpoints of triangle edges), adjacency graph, and triangulation.
     """
-    points = np.array(cones)    
+    points = np.array(cones)
+    sides = boundary_sides(points, colors)
+
+    # unknown cones carry no boundary information, so they are left out of the triangulation
+    known = sides != cfg.CONE_COLOR_UNKNOWN
+    points, sides = points[known], sides[known]
+    if len(points) < 3:
+        return np.empty((0, 2)), dict(), None
+
     tri = Delaunay(points)
     waypoint_graph = defaultdict(set)
     
@@ -24,16 +33,10 @@ def get_midpoints(cones: ArrayLike, colors) -> Tuple[np.ndarray, Dict[Tuple[floa
     p2 = points[idx2]
     p3 = points[idx3]
 
-    # get colors for each vertex using the same indices
-    colors1 = colors[idx1]  # shape: (n_triangles, 4)
-    colors2 = colors[idx2]
-    colors3 = colors[idx3]
-
-    # convert color probabilities to color labels
-    # np.argmax finds which color has highest probability
-    color_label1 = np.argmax(colors1, axis=1)  # shape: (n_triangles,)
-    color_label2 = np.argmax(colors2, axis=1)
-    color_label3 = np.argmax(colors3, axis=1)
+    # boundary side per vertex; orange cones inherited the side of their nearest blue/yellow cone
+    color_label1 = sides[idx1]  # shape: (n_triangles,)
+    color_label2 = sides[idx2]
+    color_label3 = sides[idx3]
 
     # create boolean masks for valid edges
 

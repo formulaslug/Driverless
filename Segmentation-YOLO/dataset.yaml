@@ -1,0 +1,6 @@
+train: dataset/images/train
+val: dataset/images/val
+test: dataset/images/test
+
+nc: 5
+names: ['seg_orange_cone', 'seg_yellow_cone', 'seg_large_orange_cone', 'seg_blue_cone', 'seg_unknown_cone']

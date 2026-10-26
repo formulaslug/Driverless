@@ -5,6 +5,10 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'Segmentation', 'y
 import torch
 import torch.nn.functional as F
 import numpy as np
+
+# YOLACT-Edge's vendored cython NMS uses np.int, removed in numpy>=1.24.
+if not hasattr(np, 'int'):
+    np.int = int
 from yolact_edge.data import cfg, set_cfg, MEANS, STD
 from yolact_edge.yolact import Yolact
 from yolact_edge.layers.output_utils import postprocess
