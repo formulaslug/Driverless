@@ -1,0 +1,10 @@
+from config import STEERING_RATIO
+import numpy as np
+
+class SteeringControl():
+    def __init__(self):
+        self.steering_ratio = STEERING_RATIO
+
+    def delta_to_actuator(self, delta, max_steering_angle):
+        steering_wheel_angle = np.degrees(delta) * self.steering_ratio
+        return np.clip(steering_wheel_angle, -max_steering_angle, max_steering_angle)
