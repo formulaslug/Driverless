@@ -1,11 +1,13 @@
 
-#PID COEFF
+#PID
 K_P_LONGITUDINAL = 0.5 #increase to make more aggressive on error
 K_I_LONGITUDINAL = 0.00 #increase to correct for steady state error
 K_D_LONGITUDINAL = 0.01 #increase to correct for overshoot
 
-#PURE PURSUIT
+MAX_ACCEL = 3.0 # m/s^2
+MAX_BRAKE  = -3.0 # m/s^2
 
+#PURE PURSUIT
 K_DD = 0.3 #lookahead distance scaler, increase to look further ahead
 WHEELBASE = 1.529 # meters
 MIN_LOOKAHEAD = 2.0 # meters

@@ -1,5 +1,5 @@
-from longitudinal import Longitudinal
-from lateral import Lateral
+from longitudinal.longitudinal import Longitudinal
+from lateral.lateral import Lateral
 from steering_control import SteeringControl
 """
 INPUTS:
@@ -8,7 +8,7 @@ INPUTS:
 - desired velocity (m/s)
 - config params for longitudinal and lateral controllers
 OUTPUTS:
-- desired acceleration(m/s^2), steering wheel output(degrees)
+- desired acceleration(m/s^2), curvature (1/m)
 """
 
 class Controller:
@@ -19,8 +19,8 @@ class Controller:
 
     def update(self, x, y, yaw, v, t, v_desired, waypoints):
         a_des = self.longitudinal.update(v, v_desired, t)
-        steer_output = self.steering_control.delta_to_actuator(self.lateral.update(waypoints, x, y, yaw, v), max_steering_angle=30)
-        return a_des, steer_output
+        curvature = self.lateral.pure_pursuit.get_curvature(waypoints, x, y, yaw, v)
+        return a_des, curvature
 
 
 

@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import numpy as np
+from config import MAX_ACCEL, MAX_BRAKE
 
 @dataclass
 class Gains:
@@ -50,12 +51,6 @@ class PID:
         self.dkaw : float = 0.0
 
         self.t_ramp_end : float = 0.0
-
-    def calc_possible_output(self):
-        """
-        calculates the actual possible output for the car, not raw pid
-        """
-        pass
 
     def find_rise_time(self, t, v, v_desired):
         """
@@ -144,24 +139,34 @@ class PID:
         if not self.intialized:
             dt = 0.01
             self.intialized = True
-        else:
+        elif (t != self.t_prev):
             dt = t - self.t_prev
+        else:
+            dt = 0.0001
 
-        self.net_integral += error * dt
-
-        P = error
-        I = self.net_integral
-        D = (error - self.error_prev) / dt
+        P = error * self.gains.KP
+        D = (error - self.error_prev) / dt * self.gains.KD
 
         # raw_output = self.K_p * P + self.K_i * I + self.K_d * D
-        raw_output = self.gains.KP * P + self.gains.KI * I + self.gains.KD * D
 
+        # Integral Clamp
+        I_check = self.gains.KI * (self.net_integral + error * dt)
+        check_output = P + I_check + D
+        max_output = MAX_ACCEL
+        min_output = MAX_BRAKE
+
+        saturated_high = check_output >= max_output
+        saturated_low = check_output <= min_output
+
+        if not (saturated_high or saturated_low):
+            self.net_integral += error * dt
+
+        I = self.gains.KI * self.net_integral
+
+        # PID raw output
+        a_des = P + I + D
+        a_des = np.clip(a_des, min_output, max_output)
         # self.gain_schedule(sm_in=0, t=t)
-
-        # add backcalculation for integral windup here
-        # possible_output = self.calc_possible_output() #calculates the possible output
-        # back_calculation = self.K_aw * (possible_output - raw_output) #back calculation for integral windup
-        # self.net_integral -= dt * self.K_i * back_calculation #back calculation for integral windup
 
         # Find Rise Time
         if (not self.rise_time_defined):
@@ -172,8 +177,12 @@ class PID:
         self.v_lower_bound = v_desired * 0.99
         self.find_settle_time(v=v, t=t)
 
-        return raw_output
-        # return a_des 
+        # Update state variables
+        self.t_prev = t
+        self.v_prev = v
+        self.error_prev = error
+
+        return a_des 
 
 
     
