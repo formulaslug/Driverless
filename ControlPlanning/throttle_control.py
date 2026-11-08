@@ -1,14 +1,14 @@
 # not currently used in controller
 
 
-from config import R_WHEEL,GR, MASS
+from config import R_WHEEL,T_GEARBOX as GR, M
 import numpy as np
 
 class ThrottleControl():
     def __init__(self, ):
         self.r_wheel = R_WHEEL
         self.gr = GR
-        self.m = MASS
+        self.m = M
 
     def calc_output(self, a_des):
         throttle = self.calc_throttle(a_des)

@@ -1,6 +1,6 @@
 import numpy as np
 
-class Lateral():
+class PurePursuit():
     def __init__(self, K_dd, min_lookahead, wheelbase):
         self.K_dd = K_dd
         self.min_lookahead = min_lookahead
@@ -27,7 +27,7 @@ class Lateral():
         else:
             return 2 * np.sin(alpha) / l_d
 
-    def update(self, waypoints, x, y, yaw, v):
+    def update_curvature(self, waypoints, x, y, yaw, v):
         """
         pure pursuit algorithm, uses lookahead point from set of waypoinys which dist scales with velocity,
         and returns a steering angle in radians(delta)
@@ -58,6 +58,6 @@ class Lateral():
         alpha = np.arctan2(lookahead_vector[1], lookahead_vector[0]) - (yaw)
         k = self.get_curve(alpha=alpha, l_d=l_d)
 
-        delta = np.arctan(k * self.wheelbase)
+        #delta = np.arctan(k * self.wheelbase)
 
-        return delta #delta is front wheel turning angleso 
+        return k
