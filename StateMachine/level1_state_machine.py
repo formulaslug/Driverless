@@ -24,6 +24,7 @@ from messages import (
     StateMachineStatusMessage,
 )
 from StateMachine.constants import (
+    STATE_MACHINE_DEFAULT_DT_S,
     AS_READY_LOCKOUT_DURATION_S,
     VCU_WATCHDOG_TIMEOUT_S,
     LEVEL2_WATCHDOG_TIMEOUT_S,
@@ -170,10 +171,19 @@ class Level1StateMachine:
     def request_reset(self, telemetry: VcuTelemetryMessage) -> bool:
         """Attempt to clear AS_Emergency latch and return to AS_Off."""
         if self.can_reset(telemetry):
+            logger.info("EMERGENCY RESET ACCEPTED at t=%.3fs: returning to AS_OFF", telemetry.timestamp)
             self._error_code = DiagnosticErrorCode.NONE
             self._set_state(MacroState.AS_OFF, telemetry, telemetry.timestamp)
             return True
 
+        logger.warning(
+            "EMERGENCY RESET REJECTED at t=%.3fs [ebs=%s, dsms=%s, brake=%s, sdc=%s]",
+            telemetry.timestamp,
+            telemetry.ebs_status,
+            telemetry.dsms_status,
+            telemetry.brake_status,
+            telemetry.sdc_status,
+        )
         return False
 
     # -----------------------------------------------------------------------
@@ -187,7 +197,7 @@ class Level1StateMachine:
     ) -> Tuple[StateMachineStatusMessage, ActuationCommandMessage]:
         """Execute one 50 Hz state machine cycle."""
         now = telemetry.timestamp
-        dt = (now - self._last_tick_time) if self._last_tick_time is not None else 0.02
+        dt = (now - self._last_tick_time) if self._last_tick_time is not None else STATE_MACHINE_DEFAULT_DT_S
         self._last_tick_time = now
         self._heartbeat = (self._heartbeat + 1) & HEARTBEAT_MAX
 
@@ -391,6 +401,16 @@ class Level1StateMachine:
         if old_state == new_state:
             return
 
+        mission_name = tel.ami_mission.name if hasattr(tel.ami_mission, "name") else str(tel.ami_mission)
+        logger.info(
+            "STATE TRANSITION: %s -> %s [t=%.3fs, mission=%s, substate=%s]",
+            old_state.name,
+            new_state.name,
+            now,
+            mission_name,
+            self._active_substate_name,
+        )
+
         self._state = new_state
         self._state_entry_time = now
         self._dssi_status = STATE_DSSI_MAP[new_state]
@@ -459,5 +479,13 @@ class Level1StateMachine:
     def _trip_emergency(self, fault: DiagnosticErrorCode, now: float) -> None:
         """Latch into AS_Emergency immediately with fault bitmask."""
         self._error_code |= int(fault)
+        fault_name = fault.name if hasattr(fault, "name") else str(fault)
+        logger.critical(
+            "EMERGENCY TRIP LATCHED! Fault: %s (bitmask: 0x%04X, active_state: %s, t=%.3fs)",
+            fault_name,
+            self._error_code,
+            self._state.name,
+            now,
+        )
         dummy_tel = VcuTelemetryMessage(timestamp=now, ebs_status=EbsStatus.ACTIVATED, dsms_status=False)
         self._set_state(MacroState.AS_EMERGENCY, dummy_tel, now)

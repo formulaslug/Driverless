@@ -166,3 +166,20 @@ def test_transition_as_finished_to_as_off(state_machine: Level1StateMachine) -> 
     status, _ = state_machine.step(exit_tel)
     assert status.current_state == MacroState.AS_OFF
     assert status.dssi_status == DSSIStatus.OFF
+
+
+def test_state_transition_and_emergency_logging(state_machine: Level1StateMachine, caplog: pytest.LogCaptureFixture) -> None:
+    """Verifies that state transitions and emergency faults emit structured log messages."""
+    import logging
+
+    with caplog.at_level(logging.INFO):
+        # Trigger AS_Off -> AS_Ready
+        tel = make_ready_telemetry(timestamp=1.0)
+        state_machine.step(tel)
+
+        assert any("STATE TRANSITION: AS_OFF -> AS_READY" in record.message for record in caplog.records)
+
+        # Trigger emergency trip
+        state_machine.request_emergency_trip(DiagnosticErrorCode.SDC_OPEN, timestamp=1.02)
+        assert any("EMERGENCY TRIP LATCHED!" in record.message for record in caplog.records)
+        assert any("SDC_OPEN" in record.message for record in caplog.records)
