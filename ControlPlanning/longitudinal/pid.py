@@ -186,3 +186,9 @@ class PID:
         self.error_prev = error
         self.a_des_prev = a_des
         return a_des 
+<<<<<<< HEAD
+=======
+
+
+    
+>>>>>>> cd23364caf9b90745f14b162bfbe1de1f763ba7c

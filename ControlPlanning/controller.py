@@ -1,6 +1,7 @@
-from longitudinal import Longitudinal
-from lateral import Lateral
+from longitudinal.longitudinal import Longitudinal
+from lateral.lateral import Lateral
 from steering_control import SteeringControl
+from config import K_DD, MIN_LOOKAHEAD, WHEELBASE
 """
 INPUTS:
 - Waypoints in smooth_path
@@ -8,19 +9,16 @@ INPUTS:
 - desired velocity (m/s)
 - config params for longitudinal and lateral controllers
 OUTPUTS:
-- desired acceleration(m/s^2), steering wheel output(degrees)
+- 
 """
 
 class Controller:
-    def __init__(self, K_p, K_i, K_d, K_dd, min_lookahead, wheelbase): #add vd params
-        self.longitudinal = Longitudinal(K_p, K_i, K_d)
-        self.lateral = Lateral(K_dd, min_lookahead, wheelbase)
+    def __init__(self, K_p, K_i, K_d, K_dd = K_DD, min_lookahead = MIN_LOOKAHEAD, wheelbase = WHEELBASE): 
+        self.longitudinal = Longitudinal(K_p = K_p, K_i = K_i, K_d = K_d)
+        self.lateral = Lateral(K_dd = K_dd, min_lookahead = min_lookahead, wheelbase = wheelbase)
         self.steering_control = SteeringControl()
 
     def update(self, x, y, yaw, v, t, v_desired, waypoints):
-        a_des = self.longitudinal.update(v, v_desired, t)
-        steer_output = self.steering_control.delta_to_actuator(self.lateral.update(waypoints, x, y, yaw, v), max_steering_angle=30)
-        return a_des, steer_output
-
-
-
+        a_des = self.longitudinal.update_des_accel(v, v_desired, t)
+        curvature = self.lateral.pure_pursuit.update(waypoints, x, y, yaw, v)
+        return a_des, curvature
