@@ -131,6 +131,48 @@ def test_level2_exception_latches_emergency(state_machine: Level1StateMachine) -
     assert act.gated is False
 
 
+def test_injected_mission_behavior() -> None:
+    """Verifies that a custom injected MissionBehavior overrides the default registry."""
+    class InjectedMission(MissionBehavior):
+        def __init__(self) -> None:
+            self.entered: bool = False
+            self.updated: bool = False
+
+        @property
+        def name(self) -> str:
+            return "Injected Test Mission"
+
+        def on_enter(self, context: MissionContext) -> None:
+            self.entered = True
+
+        def update(self, context: MissionContext) -> SubStateResult:
+            self.updated = True
+            return SubStateResult(next_substate="CUSTOM_SUBSTATE")
+
+        def on_exit(self, context: MissionContext, interrupted: bool = False) -> None:
+            pass
+
+    custom_mission = InjectedMission()
+    sm = Level1StateMachine(mission_behavior=custom_mission)
+
+    t = 1.0
+    sm.step(make_ready_telemetry(timestamp=t))
+
+    for _ in range(260):
+        t += 0.02
+        sm.step(make_ready_telemetry(timestamp=t))
+
+    t += 0.02
+    status, _ = sm.step(make_ready_telemetry(timestamp=t, res_go=True))
+    assert status.current_state == MacroState.AS_DRIVING
+    assert custom_mission.entered is True
+
+    t += 0.02
+    status, _ = sm.step(make_ready_telemetry(timestamp=t))
+    assert custom_mission.updated is True
+    assert status.active_substate == "CUSTOM_SUBSTATE"
+
+
 def test_emergency_latching_and_reset_guards(state_machine: Level1StateMachine) -> None:
     """AS_Emergency latches and cannot be reset until exact safety reset criteria are met."""
     tel = make_ready_telemetry(timestamp=1.0)

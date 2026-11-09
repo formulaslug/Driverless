@@ -1,4 +1,4 @@
-"""NumPy-accelerated standstill detection via rolling window buffer."""
+"""NumPy-accelerated standstill detection via rolling ring buffer."""
 
 from typing import Union
 import numpy as np
@@ -11,10 +11,11 @@ from StateMachine.constants import (
 
 
 class StandstillDetector:
-    """Tracks vehicle longitudinal velocity history in a chronological NumPy buffer.
+    """Tracks vehicle longitudinal velocity history in a circular ring buffer.
     
     Verifies that the vehicle has remained continuously within the standstill
     deadband (|v_x| < threshold) for at least a specified time duration.
+    Operates in O(1) time per push without periodic memory reallocations.
     """
 
     def __init__(self, capacity: int = STANDSTILL_BUFFER_CAPACITY) -> None:
@@ -24,22 +25,29 @@ class StandstillDetector:
         # Buffer columns: [0: timestamp, 1: longitudinal_velocity_vx]
         self._buffer: np.ndarray = np.zeros((capacity, 2), dtype=np.float64)
         self._count: int = 0
+        self._head: int = 0
 
     def push(self, timestamp: float, velocity: Union[float, np.ndarray]) -> None:
-        """Append a velocity observation, maintaining chronological order."""
+        """Append a velocity observation in O(1) time using circular indexing."""
         v_x = float(velocity[0]) if isinstance(velocity, np.ndarray) else float(velocity)
 
+        self._buffer[self._head, 0] = timestamp
+        self._buffer[self._head, 1] = v_x
+        self._head = (self._head + 1) % self.capacity
+
         if self._count < self.capacity:
-            self._buffer[self._count] = [timestamp, v_x]
             self._count += 1
-        else:
-            # Shift buffer left by 1 and append latest observation at the end
-            self._buffer = np.roll(self._buffer, -1, axis=0)
-            self._buffer[-1] = [timestamp, v_x]
 
     def get_window(self) -> np.ndarray:
         """Return chronological history of valid buffered samples."""
-        return self._buffer[:self._count].copy()
+        if self._count == 0:
+            return np.empty((0, 2), dtype=np.float64)
+
+        if self._count < self.capacity:
+            return self._buffer[:self._count].copy()
+
+        # Unroll ring buffer chronologically from oldest to newest sample
+        return np.concatenate((self._buffer[self._head:], self._buffer[:self._head]), axis=0)
 
     def is_standstill(
         self,
@@ -71,6 +79,7 @@ class StandstillDetector:
         """Clear all buffered observations."""
         self._buffer.fill(0.0)
         self._count = 0
+        self._head = 0
 
     @property
     def sample_count(self) -> int:

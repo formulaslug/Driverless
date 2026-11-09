@@ -1,5 +1,6 @@
 """Deterministic Level 1 Macro-State Machine for FSAE Driverless."""
 
+import logging
 from typing import Optional, Tuple, Set, Dict
 import numpy as np
 
@@ -34,6 +35,8 @@ from StateMachine.gatekeeper import ActuationGatekeeper
 from StateMachine.level2.base import MissionBehavior, MissionContext, SubStateResult
 from StateMachine.level2.registry import MissionRegistry
 
+logger = logging.getLogger(__name__)
+
 
 VALID_DRIVERLESS_MISSIONS: Set[Mission] = {
     Mission.INSPECTION,
@@ -52,10 +55,13 @@ STATE_DSSI_MAP: Dict[MacroState, DSSIStatus] = {
     MacroState.MANUAL_DRIVING: DSSIStatus.OFF,
 }
 
+_NUM_DIAGNOSTIC_BITS: int = 16
+_BIT_INDICES: np.ndarray = np.arange(_NUM_DIAGNOSTIC_BITS, dtype=np.int32)
+
 
 def unpack_diagnostic_flags(error_code: int) -> np.ndarray:
-    """Unpack 16-bit diagnostic bitmask into a NumPy boolean array."""
-    return np.array([(error_code >> i) & 1 for i in range(16)], dtype=bool)
+    """Vectorized unpacking of integer error bitmask into a NumPy boolean array."""
+    return ((error_code >> _BIT_INDICES) & 1).astype(bool)
 
 
 class Level1StateMachine:
@@ -70,7 +76,7 @@ class Level1StateMachine:
     - Manual_Driving: TS active with manual mission selected and DSMS off.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, mission_behavior: Optional[MissionBehavior] = None) -> None:
         self._state: MacroState = MacroState.AS_OFF
         self._dssi_status: DSSIStatus = DSSIStatus.OFF
         self._error_code: int = DiagnosticErrorCode.NONE
@@ -85,8 +91,9 @@ class Level1StateMachine:
         # Lockout and button flags
         self._premature_res_detected: bool = False
 
-        # Level 2 mission runner
-        self._active_mission_behavior: Optional[MissionBehavior] = None
+        # Level 2 mission runner (supports optional dependency injection)
+        self._injected_mission_behavior: Optional[MissionBehavior] = mission_behavior
+        self._active_mission_behavior: Optional[MissionBehavior] = mission_behavior
         self._active_substate_name: str = "NONE"
 
         # Hardware command outputs
@@ -144,17 +151,22 @@ class Level1StateMachine:
     def request_reset(self, telemetry: VcuTelemetryMessage) -> bool:
         """Attempt to clear AS_Emergency latch and return to AS_Off.
         
-        Requires EBS deactivated, DSMS off, brakes released, and SDC closed.
+        Per FSAE rules and flowchart.png:
+        Transition requires: EBS Sound Off & ASMS (DSMS) Off & Brakes Released.
+        Note: The vehicle horn / acoustic warning buzzer is managed directly by
+        VCU hardware firmware and silences after the mandated countdown. The CAN
+        bridge enforces this reset safety invariant via ebs_status != ACTIVATED,
+        dsms_status == False, brake_status == False, and sdc_status == True.
         """
         if self._state != MacroState.AS_EMERGENCY:
             return False
 
-        can_reset = np.all([
-            telemetry.ebs_status != EbsStatus.ACTIVATED,
-            not telemetry.dsms_status,
-            not telemetry.brake_status,
-            telemetry.sdc_status,
-        ])
+        can_reset = (
+            telemetry.ebs_status != EbsStatus.ACTIVATED
+            and not telemetry.dsms_status
+            and not telemetry.brake_status
+            and telemetry.sdc_status
+        )
 
         if can_reset:
             self._error_code = DiagnosticErrorCode.NONE
@@ -238,15 +250,15 @@ class Level1StateMachine:
             return None
 
         # Check AS_Ready preconditions
-        all_ready = np.all([
-            tel.ebs_status == EbsStatus.ARMED,
-            tel.dsms_status,
-            tel.dbs_check_ok,
-            tel.ts_status,
-            tel.ami_mission in VALID_DRIVERLESS_MISSIONS,
-            tel.brake_status,
-            tel.sdc_status,
-        ])
+        all_ready = (
+            tel.ebs_status == EbsStatus.ARMED
+            and tel.dsms_status
+            and tel.dbs_check_ok
+            and tel.ts_status
+            and (tel.ami_mission in VALID_DRIVERLESS_MISSIONS)
+            and tel.brake_status
+            and tel.sdc_status
+        )
         if all_ready:
             self._set_state(MacroState.AS_READY, tel, now)
 
@@ -282,13 +294,13 @@ class Level1StateMachine:
 
         # Valid fresh RES Go press -> AS_Driving
         if tel.res_go_signal:
-            preconditions_hold = np.all([
-                tel.ebs_status == EbsStatus.ARMED,
-                tel.dsms_status,
-                tel.ts_status,
-                tel.sdc_status,
-                tel.dbs_check_ok,
-            ])
+            preconditions_hold = (
+                tel.ebs_status == EbsStatus.ARMED
+                and tel.dsms_status
+                and tel.ts_status
+                and tel.sdc_status
+                and tel.dbs_check_ok
+            )
             if preconditions_hold:
                 self._set_state(MacroState.AS_DRIVING, tel, now)
 
@@ -329,7 +341,8 @@ class Level1StateMachine:
                     self._active_substate_name = sub_result.next_substate
                 if sub_result.actuation_command is not None:
                     cmd_out = sub_result.actuation_command
-            except Exception:
+            except Exception as exc:
+                logger.exception("Unhandled exception in Level 2 mission behavior update: %s", exc)
                 self._trip_emergency(DiagnosticErrorCode.LEVEL2_EXCEPTION, now)
                 return None
 
@@ -384,10 +397,10 @@ class Level1StateMachine:
                 )
                 try:
                     self._active_mission_behavior.on_exit(ctx, interrupted=(new_state == MacroState.AS_EMERGENCY))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.exception("Error executing mission on_exit callback: %s", exc)
                 if new_state == MacroState.AS_OFF:
-                    self._active_mission_behavior = None
+                    self._active_mission_behavior = self._injected_mission_behavior
 
         # State entry side-effects
         if new_state == MacroState.AS_OFF:
@@ -408,7 +421,11 @@ class Level1StateMachine:
             self._ebs_trigger_cmd = False
             self._standstill_detector.reset()
 
-            self._active_mission_behavior = MissionRegistry.create(tel.ami_mission)
+            if self._injected_mission_behavior is not None:
+                self._active_mission_behavior = self._injected_mission_behavior
+            else:
+                self._active_mission_behavior = MissionRegistry.create(tel.ami_mission)
+
             if self._active_mission_behavior is not None:
                 setattr(self._active_mission_behavior, "_mission_enum", tel.ami_mission)
                 sub_name = getattr(self._active_mission_behavior, "current_substate", "INIT")
