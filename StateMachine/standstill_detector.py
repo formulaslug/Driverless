@@ -29,7 +29,8 @@ class StandstillDetector:
 
     def push(self, timestamp: float, velocity: Union[float, np.ndarray]) -> None:
         """Append a velocity observation in O(1) time using circular indexing."""
-        v_x = float(velocity[0]) if isinstance(velocity, np.ndarray) else float(velocity)
+        v_arr = np.atleast_1d(velocity)
+        v_x = float(v_arr[0])
 
         self._buffer[self._head, 0] = timestamp
         self._buffer[self._head, 1] = v_x

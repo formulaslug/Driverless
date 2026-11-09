@@ -91,6 +91,18 @@ def test_numpy_vector_input() -> None:
     assert detector.is_standstill(required_duration_s=0.5, threshold_mps=0.05)
 
 
+def test_numpy_0d_scalar_input() -> None:
+    """Buffer safely handles 0-dimensional scalar NumPy arrays without indexing errors."""
+    detector = StandstillDetector(capacity=50)
+    t = 0.0
+    for _ in range(30):
+        scalar_arr = np.array(0.01, dtype=np.float64)
+        detector.push(timestamp=t, velocity=scalar_arr)
+        t += 0.02
+
+    assert detector.is_standstill(required_duration_s=0.5, threshold_mps=0.05)
+
+
 def test_reset_clears_buffer() -> None:
     """Reset clears sample count and buffer contents."""
     detector = StandstillDetector(capacity=50)
