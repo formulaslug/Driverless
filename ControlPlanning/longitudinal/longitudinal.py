@@ -1,4 +1,4 @@
-from pid import PID
+from longitudinal.pid import PID
 
 class Longitudinal:
     def __init__(self, K_p, K_i, K_d, Gains = None, v_des = 0.0):
