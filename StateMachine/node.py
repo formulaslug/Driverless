@@ -1,6 +1,7 @@
 """Pipeline Node integration for the FSAE Driverless State Machine."""
 
 from typing import Optional, List, Union
+import threading
 import sys
 import os
 
@@ -39,6 +40,7 @@ class StateMachineNode(Node):
         super().__init__(name, queueSize=queueSize)
         self.state_machine: Level1StateMachine = state_machine or Level1StateMachine()
         self._latest_external_actuation: Optional[ActuationCommandMessage] = None
+        self._lock: threading.Lock = threading.Lock()
 
     def process(
         self, message: Union[VcuTelemetryMessage, ActuationCommandMessage]
@@ -53,18 +55,20 @@ class StateMachineNode(Node):
             or None on external actuation caching.
         """
         if isinstance(message, ActuationCommandMessage):
-            self._latest_external_actuation = message
+            with self._lock:
+                self._latest_external_actuation = message
             return None
 
         if isinstance(message, VcuTelemetryMessage):
-            actuation_to_use = self._latest_external_actuation
-            if (
-                actuation_to_use is not None
-                and (message.timestamp - actuation_to_use.timestamp) > LEVEL2_WATCHDOG_TIMEOUT_S
-            ):
-                # Command is stale (> 200ms); invalidate cached command
-                actuation_to_use = None
-                self._latest_external_actuation = None
+            with self._lock:
+                actuation_to_use = self._latest_external_actuation
+                if (
+                    actuation_to_use is not None
+                    and (message.timestamp - actuation_to_use.timestamp) > LEVEL2_WATCHDOG_TIMEOUT_S
+                ):
+                    # Command is stale (> 200ms); invalidate cached command
+                    actuation_to_use = None
+                    self._latest_external_actuation = None
 
             status_msg, gated_actuation = self.state_machine.step(
                 telemetry=message,
@@ -73,3 +77,8 @@ class StateMachineNode(Node):
             return [status_msg, gated_actuation]
 
         return None
+
+    def request_reset(self, telemetry: VcuTelemetryMessage) -> bool:
+        """Thread-safe request to reset emergency state."""
+        with self._lock:
+            return self.state_machine.request_reset(telemetry)

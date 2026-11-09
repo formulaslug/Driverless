@@ -102,3 +102,77 @@ def test_statemachine_node_drops_stale_external_actuation() -> None:
     assert res is not None
     # Stale actuation was cleared
     assert node._latest_external_actuation is None
+
+
+def test_statemachine_node_concurrent_access() -> None:
+    """Verifies thread-safe concurrent actuation caching and telemetry stepping."""
+    import threading
+
+    node = StateMachineNode()
+    sim = MockVcuSimulator()
+    sim.set_readiness_preconditions()
+
+    stop_event = threading.Event()
+    errors = []
+
+    def actuation_worker():
+        t = 1.0
+        while not stop_event.is_set():
+            cmd = ActuationCommandMessage(
+                timestamp=t,
+                steering=np.array([0.1], dtype=np.float64),
+                throttle=np.array([0.2], dtype=np.float64),
+            )
+            try:
+                node.process(cmd)
+            except Exception as e:
+                errors.append(e)
+            t += 0.01
+            time.sleep(0.001)
+
+    def telemetry_worker():
+        t = 1.0
+        while not stop_event.is_set():
+            msg = sim.step(dt=0.01)
+            try:
+                node.process(msg)
+            except Exception as e:
+                errors.append(e)
+            t += 0.01
+            time.sleep(0.001)
+
+    t1 = threading.Thread(target=actuation_worker)
+    t2 = threading.Thread(target=telemetry_worker)
+    t1.start()
+    t2.start()
+
+    time.sleep(0.05)
+    stop_event.set()
+    t1.join()
+    t2.join()
+
+    assert len(errors) == 0
+
+
+def test_statemachine_node_request_reset() -> None:
+    """Verifies StateMachineNode delegates emergency reset thread-safely."""
+    from messages import DiagnosticErrorCode
+
+    node = StateMachineNode()
+    tel = VcuTelemetryMessage(timestamp=1.0, ebs_status=EbsStatus.ARMED, dsms_status=True)
+    node.process(tel)
+
+    node.state_machine.request_emergency_trip(DiagnosticErrorCode.SDC_OPEN, timestamp=1.02)
+    assert node.state_machine.current_state == MacroState.AS_EMERGENCY
+
+    # Reset with valid telemetry
+    valid_reset_tel = VcuTelemetryMessage(
+        timestamp=1.04,
+        ebs_status=EbsStatus.ARMED,
+        dsms_status=False,
+        brake_status=False,
+        sdc_status=True,
+    )
+    ok = node.request_reset(valid_reset_tel)
+    assert ok is True
+    assert node.state_machine.current_state == MacroState.AS_OFF
