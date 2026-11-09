@@ -9,6 +9,7 @@ from node import Node
 from messages import (
     MacroState,
     DSSIStatus,
+    EbsStatus,
     VcuTelemetryMessage,
     StateMachineStatusMessage,
     ActuationCommandMessage,
@@ -79,3 +80,25 @@ def test_statemachine_node_processes_external_actuation() -> None:
     # Caching returns None
     assert result is None
     assert node._latest_external_actuation is ext_cmd
+
+
+def test_statemachine_node_drops_stale_external_actuation() -> None:
+    """StateMachineNode discards cached external actuation messages that exceed 200ms age."""
+    node = StateMachineNode()
+
+    # Cached command timestamp = 1.0s
+    node.process(
+        ActuationCommandMessage(
+            timestamp=1.0,
+            steering=np.array([0.1], dtype=np.float64),
+            throttle=np.array([0.5], dtype=np.float64),
+        )
+    )
+    assert node._latest_external_actuation is not None
+
+    # Inbound telemetry at 1.3s (300ms later > 200ms timeout)
+    tel = VcuTelemetryMessage(timestamp=1.3, ebs_status=EbsStatus.ARMED)
+    res = node.process(tel)
+    assert res is not None
+    # Stale actuation was cleared
+    assert node._latest_external_actuation is None

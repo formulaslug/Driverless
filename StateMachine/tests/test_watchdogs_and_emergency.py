@@ -10,6 +10,7 @@ from messages import (
     Mission,
     DiagnosticErrorCode,
     VcuTelemetryMessage,
+    ActuationCommandMessage,
 )
 from StateMachine.level1_state_machine import Level1StateMachine
 from StateMachine.level2.base import MissionBehavior, MissionContext, SubStateResult
@@ -217,6 +218,47 @@ def test_emergency_latching_and_reset_guards(state_machine: Level1StateMachine) 
         res_go_signal=False,
         velocity=np.zeros(3, dtype=np.float64),
     )
+    assert state_machine.can_reset(tel_valid)
     assert state_machine.request_reset(tel_valid)
     assert state_machine.current_state == MacroState.AS_OFF
     assert state_machine.error_code == DiagnosticErrorCode.NONE
+
+
+def test_level2_external_planner_watchdog_timeout() -> None:
+    """When relying on external controls in AS_Driving, missing commands for > 200ms trip watchdog."""
+    sm = Level1StateMachine()  # No injected mission, Mission.TRACKDRIVE has no registered behavior
+    t = 1.0
+    sm.step(make_ready_telemetry(timestamp=t, mission=Mission.TRACKDRIVE))
+
+    for _ in range(260):
+        t += 0.02
+        sm.step(make_ready_telemetry(timestamp=t, mission=Mission.TRACKDRIVE))
+
+    # Launch driving
+    t += 0.02
+    cmd = ActuationCommandMessage(timestamp=t, steering=np.zeros(1), throttle=np.array([0.2]))
+    status, _ = sm.step(make_ready_telemetry(timestamp=t, res_go=True, mission=Mission.TRACKDRIVE), external_actuation=cmd)
+    assert status.current_state == MacroState.AS_DRIVING
+
+    # Telemetry streams at 50Hz, but external planner sends stale commands (> 200ms old)
+    for _ in range(12):  # 12 * 0.02s = 240ms > 200ms timeout
+        t += 0.02
+        status, act = sm.step(
+            make_ready_telemetry(timestamp=t, mission=Mission.TRACKDRIVE),
+            external_actuation=cmd,  # Stale timestamp
+        )
+
+    assert status.current_state == MacroState.AS_EMERGENCY
+    assert status.error_code & DiagnosticErrorCode.WATCHDOG_TIMEOUT_LEVEL2
+    assert act.gated is False
+
+
+def test_state_self_transition_preserves_entry_time(state_machine: Level1StateMachine) -> None:
+    """Invoking _set_state on an already-active state does not re-stamp entry time."""
+    tel = make_ready_telemetry(timestamp=1.0)
+    state_machine.step(tel)
+    initial_entry_time = state_machine._state_entry_time
+
+    # Attempt re-setting to AS_READY at t = 2.0
+    state_machine._set_state(MacroState.AS_READY, tel, now=2.0)
+    assert state_machine._state_entry_time == initial_entry_time

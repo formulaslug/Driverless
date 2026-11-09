@@ -26,6 +26,7 @@ from messages import (
 from StateMachine.constants import (
     AS_READY_LOCKOUT_DURATION_S,
     VCU_WATCHDOG_TIMEOUT_S,
+    LEVEL2_WATCHDOG_TIMEOUT_S,
     STANDSTILL_MIN_DURATION_S,
     STANDSTILL_VELOCITY_THRESHOLD_MPS,
     HEARTBEAT_MAX,
@@ -148,8 +149,8 @@ class Level1StateMachine:
         """Trip immediately into AS_Emergency with specific fault code."""
         self._trip_emergency(fault, timestamp)
 
-    def request_reset(self, telemetry: VcuTelemetryMessage) -> bool:
-        """Attempt to clear AS_Emergency latch and return to AS_Off.
+    def can_reset(self, telemetry: VcuTelemetryMessage) -> bool:
+        """Evaluate whether telemetry satisfies all emergency reset preconditions.
         
         Per FSAE rules and flowchart.png:
         Transition requires: EBS Sound Off & ASMS (DSMS) Off & Brakes Released.
@@ -158,17 +159,17 @@ class Level1StateMachine:
         bridge enforces this reset safety invariant via ebs_status != ACTIVATED,
         dsms_status == False, brake_status == False, and sdc_status == True.
         """
-        if self._state != MacroState.AS_EMERGENCY:
-            return False
-
-        can_reset = (
-            telemetry.ebs_status != EbsStatus.ACTIVATED
+        return (
+            self._state == MacroState.AS_EMERGENCY
+            and telemetry.ebs_status != EbsStatus.ACTIVATED
             and not telemetry.dsms_status
             and not telemetry.brake_status
             and telemetry.sdc_status
         )
 
-        if can_reset:
+    def request_reset(self, telemetry: VcuTelemetryMessage) -> bool:
+        """Attempt to clear AS_Emergency latch and return to AS_Off."""
+        if self.can_reset(telemetry):
             self._error_code = DiagnosticErrorCode.NONE
             self._set_state(MacroState.AS_OFF, telemetry, telemetry.timestamp)
             return True
@@ -345,6 +346,11 @@ class Level1StateMachine:
                 logger.exception("Unhandled exception in Level 2 mission behavior update: %s", exc)
                 self._trip_emergency(DiagnosticErrorCode.LEVEL2_EXCEPTION, now)
                 return None
+        else:
+            # Driving without internal mission: external planner must actively provide commands
+            if external_cmd is None or (now - external_cmd.timestamp) > LEVEL2_WATCHDOG_TIMEOUT_S:
+                self._trip_emergency(DiagnosticErrorCode.WATCHDOG_TIMEOUT_LEVEL2, now)
+                return None
 
         # Level 2 emergency stop request
         if sub_result is not None and sub_result.emergency_stop:
@@ -382,6 +388,9 @@ class Level1StateMachine:
     def _set_state(self, new_state: MacroState, tel: VcuTelemetryMessage, now: float) -> None:
         """Centralized state transition handler."""
         old_state = self._state
+        if old_state == new_state:
+            return
+
         self._state = new_state
         self._state_entry_time = now
         self._dssi_status = STATE_DSSI_MAP[new_state]

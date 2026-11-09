@@ -16,12 +16,19 @@ STANDSTILL_BUFFER_CAPACITY: int = 100            # ring buffer capacity (2.0s at
 VCU_WATCHDOG_TIMEOUT_S: float = 0.2              # 200 ms timeout per FSAE rules
 LEVEL2_WATCHDOG_TIMEOUT_S: float = 0.2           # 200 ms timeout for mission planner
 
-# Default actuation commands
+# Default actuation commands and physical limits
 BRAKE_SERVICE_NORM: float = 1.0
 BRAKE_EBS_NORM: float = 1.0
 BRAKE_ZERO_NORM: float = 0.0
 THROTTLE_ZERO_NORM: float = 0.0
 STEERING_ZERO_RAD: float = 0.0
+
+# Normalized and physical rack actuation bounds
+THROTTLE_MIN_NORM: float = 0.0
+THROTTLE_MAX_NORM: float = 1.0
+BRAKE_MIN_NORM: float = 0.0
+BRAKE_MAX_NORM: float = 1.0
+STEERING_MAX_RAD: float = 0.4363  # +/- 25.0 degrees physical steering rack limit
 
 # Rolling counter rollover limit
 HEARTBEAT_MAX: int = 0xFFFFFFFF

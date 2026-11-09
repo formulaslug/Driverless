@@ -56,6 +56,41 @@ class MockVcuSimulator:
         self.res_go_signal = False
         self.velocity.fill(0.0)
 
+    def toggle_dsms(self, state: Optional[bool] = None) -> bool:
+        """Toggle or set Driverless System Master Switch (DSMS)."""
+        self.dsms_status = (not self.dsms_status) if state is None else state
+        return self.dsms_status
+
+    def toggle_ebs(self, status: Optional[EbsStatus] = None) -> EbsStatus:
+        """Toggle or set Emergency Brake System (EBS) status."""
+        if status is not None:
+            self.ebs_status = status
+        else:
+            self.ebs_status = (
+                EbsStatus.ACTIVATED if self.ebs_status == EbsStatus.ARMED else EbsStatus.ARMED
+            )
+        return self.ebs_status
+
+    def trip_sdc(self) -> None:
+        """Open the Shutdown Circuit (SDC)."""
+        self.sdc_status = False
+
+    def close_sdc(self) -> None:
+        """Close/restore the Shutdown Circuit (SDC)."""
+        self.sdc_status = True
+
+    def press_res_go(self) -> None:
+        """Assert Remote Emergency System (RES) Go / Ready-to-Drive button."""
+        self.res_go_signal = True
+
+    def release_res_go(self) -> None:
+        """Release Remote Emergency System (RES) Go button."""
+        self.res_go_signal = False
+
+    def set_speed(self, vx: float) -> None:
+        """Set longitudinal vehicle velocity in m/s."""
+        self.velocity[0] = vx
+
     def step(self, dt: float = STATE_MACHINE_DEFAULT_DT_S) -> VcuTelemetryMessage:
         """Advance simulator time and return a fresh telemetry snapshot."""
         self.time += dt
@@ -242,6 +277,30 @@ def run_sdc_trip_scenario(verbose: bool = True) -> bool:
     return True
 
 
+def run_watchdog_trip_scenario(verbose: bool = True) -> bool:
+    """Verify emergency trip when telemetry drops for > 200ms in AS_Ready."""
+    sm = Level1StateMachine()
+    vcu = MockVcuSimulator(initial_time=0.0)
+
+    vcu.set_readiness_preconditions()
+    status, _ = sm.step(vcu.step())
+    assert status.current_state == MacroState.AS_READY
+
+    if verbose:
+        print("[Scenario] Injecting 300ms telemetry dropout (> 200ms watchdog)...")
+    dropped_tel = vcu.step(dt=0.30)
+    status, act = sm.step(dropped_tel)
+
+    assert status.current_state == MacroState.AS_EMERGENCY
+    assert status.error_code & 1 << 2  # DiagnosticErrorCode.WATCHDOG_TIMEOUT_VCU
+    assert act.gated is False
+    assert status.ebs_trigger_cmd is True
+
+    if verbose:
+        print("[Scenario] SUCCESS: VCU watchdog timeout trip verified.")
+    return True
+
+
 # ---------------------------------------------------------------------------
 # CLI Entrypoint
 # ---------------------------------------------------------------------------
@@ -250,7 +309,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Mock VCU Test Harness and Scenario Runner")
     parser.add_argument(
         "--scenario",
-        choices=["normal", "premature-res", "sdc-trip", "all"],
+        choices=["normal", "premature-res", "sdc-trip", "watchdog", "all"],
         default="all",
         help="Automated scenario to execute",
     )
@@ -263,6 +322,8 @@ def main() -> None:
         run_premature_res_scenario()
     if args.scenario in ("sdc-trip", "all"):
         run_sdc_trip_scenario()
+    if args.scenario in ("watchdog", "all"):
+        run_watchdog_trip_scenario()
     print("All requested Mock VCU scenarios passed successfully.")
 
 

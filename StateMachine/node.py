@@ -16,7 +16,9 @@ from messages import (
     VcuTelemetryMessage,
     ActuationCommandMessage,
     StateMachineStatusMessage,
+    MacroState,
 )
+from StateMachine.constants import LEVEL2_WATCHDOG_TIMEOUT_S
 from StateMachine.level1_state_machine import Level1StateMachine
 
 
@@ -55,9 +57,18 @@ class StateMachineNode(Node):
             return None
 
         if isinstance(message, VcuTelemetryMessage):
+            actuation_to_use = self._latest_external_actuation
+            if (
+                actuation_to_use is not None
+                and (message.timestamp - actuation_to_use.timestamp) > LEVEL2_WATCHDOG_TIMEOUT_S
+            ):
+                # Command is stale (> 200ms); invalidate cached command
+                actuation_to_use = None
+                self._latest_external_actuation = None
+
             status_msg, gated_actuation = self.state_machine.step(
                 telemetry=message,
-                external_actuation=self._latest_external_actuation,
+                external_actuation=actuation_to_use,
             )
             return [status_msg, gated_actuation]
 
