@@ -1,6 +1,6 @@
 """Deterministic Level 1 Macro-State Machine for FSAE Driverless."""
 
-from typing import Optional, Tuple, Set
+from typing import Optional, Tuple, Set, Dict
 import numpy as np
 
 import sys
@@ -43,32 +43,31 @@ VALID_DRIVERLESS_MISSIONS: Set[Mission] = {
     Mission.TRACKDRIVE,
 }
 
-_NUM_DIAGNOSTIC_BITS: int = 16
-_BIT_INDICES: np.ndarray = np.arange(_NUM_DIAGNOSTIC_BITS, dtype=np.int32)
+STATE_DSSI_MAP: Dict[MacroState, DSSIStatus] = {
+    MacroState.AS_OFF: DSSIStatus.OFF,
+    MacroState.AS_READY: DSSIStatus.CONTINUOUS_YELLOW,
+    MacroState.AS_DRIVING: DSSIStatus.FLASHING_YELLOW,
+    MacroState.AS_FINISHED: DSSIStatus.FLASHING_BLUE,
+    MacroState.AS_EMERGENCY: DSSIStatus.CONTINUOUS_BLUE,
+    MacroState.MANUAL_DRIVING: DSSIStatus.OFF,
+}
 
 
 def unpack_diagnostic_flags(error_code: int) -> np.ndarray:
-    """Vectorized unpacking of integer error bitmask into a NumPy boolean array.
-    
-    Args:
-        error_code: Integer diagnostic bitmask.
-        
-    Returns:
-        np.ndarray of shape (16,) containing boolean status for each bit.
-    """
-    return ((error_code >> _BIT_INDICES) & 1).astype(bool)
+    """Unpack 16-bit diagnostic bitmask into a NumPy boolean array."""
+    return np.array([(error_code >> i) & 1 for i in range(16)], dtype=bool)
 
 
 class Level1StateMachine:
     """FSAE Driverless Level 1 Macro-State Machine.
     
-    Governs the top-level safety states:
-    - AS_Off: System quiescent, checks readiness preconditions.
-    - AS_Ready: Preconditions verified, 5.0s lockout enforced, service brake engaged.
-    - AS_Driving: Autonomous mission active, 50 Hz watchdogs, Level 3 actuation multiplexed.
-    - AS_Finished: Autonomous run complete, verified standstill, EBS engaged.
-    - AS_Emergency: Safety shutdown circuit open or fault tripped; latching.
-    - Manual_Driving: TS active with manual mission and DSMS off.
+    Governs mandatory competition safety states:
+    - AS_Off: System powered off / safe neutral.
+    - AS_Ready: Preconditions verified, 5.0s warning timer, service brake clamped.
+    - AS_Driving: Autonomous mission active, 50 Hz watchdogs, Level 3 gated.
+    - AS_Finished: Mission complete, verified standstill, EBS locked.
+    - AS_Emergency: Safety circuit open or critical fault; latched until manual reset.
+    - Manual_Driving: TS active with manual mission selected and DSMS off.
     """
 
     def __init__(self) -> None:
@@ -76,21 +75,21 @@ class Level1StateMachine:
         self._dssi_status: DSSIStatus = DSSIStatus.OFF
         self._error_code: int = DiagnosticErrorCode.NONE
 
-        # Timers and timestamps
+        # Timers and telemetry tracking
         self._state_entry_time: float = 0.0
         self._ready_start_time: float = 0.0
+        self._mission_start_time: float = 0.0
         self._last_vcu_telemetry_time: Optional[float] = None
         self._last_tick_time: Optional[float] = None
 
-        # Lockout and RES Go handling
+        # Lockout and button flags
         self._premature_res_detected: bool = False
 
-        # Active mission behavior and sub-state
+        # Level 2 mission runner
         self._active_mission_behavior: Optional[MissionBehavior] = None
         self._active_substate_name: str = "NONE"
-        self._mission_start_time: float = 0.0
 
-        # Commands and outputs
+        # Hardware command outputs
         self._heartbeat: int = 0
         self._ebs_trigger_cmd: bool = False
         self._service_brake_cmd: bool = False
@@ -98,135 +97,117 @@ class Level1StateMachine:
         # Standstill detection buffer
         self._standstill_detector: StandstillDetector = StandstillDetector()
 
+    # -----------------------------------------------------------------------
+    # Public Properties
+    # -----------------------------------------------------------------------
+
     @property
     def current_state(self) -> MacroState:
-        """Active Level 1 MacroState."""
         return self._state
 
     @property
     def dssi_status(self) -> DSSIStatus:
-        """Active Driverless System Status Indicator state."""
         return self._dssi_status
 
     @property
     def error_code(self) -> int:
-        """Current diagnostic error code bitmask."""
         return self._error_code
 
     @property
     def heartbeat(self) -> int:
-        """Rolling heartbeat counter."""
         return self._heartbeat
 
     @property
     def ready_timer_elapsed(self) -> float:
-        """Elapsed time in AS_Ready state (seconds)."""
         if self._state == MacroState.AS_READY:
             return max(0.0, (self._last_tick_time or 0.0) - self._ready_start_time)
         return 0.0
 
     @property
     def active_mission(self) -> Optional[Mission]:
-        """Currently active driverless mission."""
         if self._active_mission_behavior is not None:
-            # Look up registered mission
             return getattr(self._active_mission_behavior, "_mission_enum", None)
         return None
 
     @property
     def active_substate_name(self) -> str:
-        """Current Level 2 sub-state name."""
         return self._active_substate_name
 
+    # -----------------------------------------------------------------------
+    # External Fault & Reset Controls
+    # -----------------------------------------------------------------------
+
     def request_emergency_trip(self, fault: DiagnosticErrorCode, timestamp: float) -> None:
-        """Explicitly trip the system into AS_Emergency with diagnostic fault code.
-        
-        Args:
-            fault: Diagnostic fault bitmask.
-            timestamp: Current monotonic timestamp.
-        """
-        self._transition_to_emergency(fault, timestamp)
+        """Trip immediately into AS_Emergency with specific fault code."""
+        self._trip_emergency(fault, timestamp)
 
     def request_reset(self, telemetry: VcuTelemetryMessage) -> bool:
         """Attempt to clear AS_Emergency latch and return to AS_Off.
         
-        Per rulebook / flowchart: Requires EBS sound off (EBS unlatched/deactivated),
-        DSMS switch off, and brakes released.
-        
-        Args:
-            telemetry: Current VCU telemetry.
-            
-        Returns:
-            True if reset succeeded and state transitioned to AS_Off; False if conditions not met.
+        Requires EBS deactivated, DSMS off, brakes released, and SDC closed.
         """
         if self._state != MacroState.AS_EMERGENCY:
             return False
 
-        # Reset conditions: EBS deactivated, DSMS off, brakes released, SDC closed
-        reset_conditions = np.array([
+        can_reset = np.all([
             telemetry.ebs_status != EbsStatus.ACTIVATED,
             not telemetry.dsms_status,
             not telemetry.brake_status,
             telemetry.sdc_status,
-        ], dtype=bool)
+        ])
 
-        if np.all(reset_conditions):
+        if can_reset:
             self._error_code = DiagnosticErrorCode.NONE
-            self._transition_to_state(MacroState.AS_OFF, telemetry.timestamp)
+            self._set_state(MacroState.AS_OFF, telemetry, telemetry.timestamp)
             return True
 
         return False
+
+    # -----------------------------------------------------------------------
+    # Main Step Cycle
+    # -----------------------------------------------------------------------
 
     def step(
         self,
         telemetry: VcuTelemetryMessage,
         external_actuation: Optional[ActuationCommandMessage] = None,
     ) -> Tuple[StateMachineStatusMessage, ActuationCommandMessage]:
-        """Execute one deterministic cycle of the state machine.
-        
-        Args:
-            telemetry: Fresh VCU telemetry message.
-            external_actuation: Optional actuation command from external Controls pipeline.
-            
-        Returns:
-            Tuple of (StateMachineStatusMessage, gated ActuationCommandMessage).
-        """
+        """Execute one 50 Hz state machine cycle."""
         now = telemetry.timestamp
         dt = (now - self._last_tick_time) if self._last_tick_time is not None else 0.02
         self._last_tick_time = now
         self._heartbeat = (self._heartbeat + 1) & HEARTBEAT_MAX
 
-        # Update standstill buffer with incoming velocity
+        # Update standstill buffer
         self._standstill_detector.push(now, telemetry.velocity)
 
-        # Check VCU watchdog for active autonomous states (AS_Ready, AS_Driving, AS_Finished)
-        if self._state not in (MacroState.AS_OFF, MacroState.MANUAL_DRIVING):
+        # 1. Comms Watchdog Check (active during AS_Ready, AS_Driving, AS_Finished)
+        if self._state in (MacroState.AS_READY, MacroState.AS_DRIVING, MacroState.AS_FINISHED):
             if self._last_vcu_telemetry_time is not None:
-                time_since_vcu = now - self._last_vcu_telemetry_time
-                if time_since_vcu > VCU_WATCHDOG_TIMEOUT_S:
-                    self._transition_to_emergency(DiagnosticErrorCode.WATCHDOG_TIMEOUT_VCU, now)
+                if (now - self._last_vcu_telemetry_time) > VCU_WATCHDOG_TIMEOUT_S:
+                    self._trip_emergency(DiagnosticErrorCode.WATCHDOG_TIMEOUT_VCU, now)
         self._last_vcu_telemetry_time = now
 
-        # Execute state-specific logic
-        raw_actuation = external_actuation
+        # 2. Evaluate State-Specific Logic
+        raw_cmd = external_actuation
 
         if self._state == MacroState.AS_OFF:
-            raw_actuation = self._handle_as_off(telemetry, now)
+            raw_cmd = self._step_as_off(telemetry, now)
         elif self._state == MacroState.AS_READY:
-            raw_actuation = self._handle_as_ready(telemetry, now)
+            raw_cmd = self._step_as_ready(telemetry, now)
         elif self._state == MacroState.AS_DRIVING:
-            raw_actuation = self._handle_as_driving(telemetry, dt, now, external_actuation)
+            raw_cmd = self._step_as_driving(telemetry, dt, now, external_actuation)
         elif self._state == MacroState.AS_FINISHED:
-            raw_actuation = self._handle_as_finished(telemetry, now)
+            raw_cmd = self._step_as_finished(telemetry, now)
         elif self._state == MacroState.AS_EMERGENCY:
-            raw_actuation = self._handle_as_emergency(telemetry, now)
+            raw_cmd = self._step_as_emergency(telemetry, now)
         elif self._state == MacroState.MANUAL_DRIVING:
-            raw_actuation = self._handle_manual_driving(telemetry, now)
+            raw_cmd = self._step_manual_driving(telemetry, now)
 
-        # Apply Level 3 Actuation Gatekeeper
-        gated_actuation = ActuationGatekeeper.gate_command(
+        # 3. Gated Actuation Filter
+        gated_cmd = ActuationGatekeeper.gate_command(
             state=self._state,
-            requested_command=raw_actuation,
+            requested_command=raw_cmd,
             timestamp=now,
         )
 
@@ -244,324 +225,213 @@ class Level1StateMachine:
             ready_timer_elapsed=self.ready_timer_elapsed,
         )
 
-        return status_msg, gated_actuation
+        return status_msg, gated_cmd
 
     # -----------------------------------------------------------------------
-    # State Handlers
+    # State Logic Handlers
     # -----------------------------------------------------------------------
 
-    def _handle_as_off(
-        self, telemetry: VcuTelemetryMessage, now: float
-    ) -> Optional[ActuationCommandMessage]:
-        self._ebs_trigger_cmd = False
-        self._service_brake_cmd = False
-
-        # Check Manual Driving transition: Manual mission & EBS unavailable & DSMS off & TS active
-        manual_conditions = np.array([
-            telemetry.ami_mission == Mission.MANUAL,
-            telemetry.ebs_status == EbsStatus.UNAVAILABLE,
-            not telemetry.dsms_status,
-            telemetry.ts_status,
-        ], dtype=bool)
-        if np.all(manual_conditions):
-            self._transition_to_state(MacroState.MANUAL_DRIVING, now)
+    def _step_as_off(self, tel: VcuTelemetryMessage, now: float) -> Optional[ActuationCommandMessage]:
+        # Check Manual Driving transition
+        if tel.ami_mission == Mission.MANUAL and tel.ebs_status == EbsStatus.UNAVAILABLE and not tel.dsms_status and tel.ts_status:
+            self._set_state(MacroState.MANUAL_DRIVING, tel, now)
             return None
 
-        # Check AS_Off -> AS_Ready preconditions
-        readiness_conditions = np.array([
-            telemetry.ebs_status == EbsStatus.ARMED,
-            telemetry.dsms_status,
-            telemetry.dbs_check_ok,
-            telemetry.ts_status,
-            telemetry.ami_mission in VALID_DRIVERLESS_MISSIONS,
-            telemetry.brake_status,
-            telemetry.sdc_status,
-        ], dtype=bool)
-
-        if np.all(readiness_conditions):
-            self._transition_to_state(MacroState.AS_READY, now)
+        # Check AS_Ready preconditions
+        all_ready = np.all([
+            tel.ebs_status == EbsStatus.ARMED,
+            tel.dsms_status,
+            tel.dbs_check_ok,
+            tel.ts_status,
+            tel.ami_mission in VALID_DRIVERLESS_MISSIONS,
+            tel.brake_status,
+            tel.sdc_status,
+        ])
+        if all_ready:
+            self._set_state(MacroState.AS_READY, tel, now)
 
         return None
 
-    def _handle_as_ready(
-        self, telemetry: VcuTelemetryMessage, now: float
-    ) -> Optional[ActuationCommandMessage]:
-        # Enforce service brake engaged in AS_Ready
-        self._service_brake_cmd = True
-        self._ebs_trigger_cmd = False
-
-        # Check critical emergency trips
-        if not telemetry.sdc_status:
-            self._transition_to_emergency(DiagnosticErrorCode.SDC_OPEN, now)
+    def _step_as_ready(self, tel: VcuTelemetryMessage, now: float) -> Optional[ActuationCommandMessage]:
+        # Critical safety trips
+        if not tel.sdc_status:
+            self._trip_emergency(DiagnosticErrorCode.SDC_OPEN, now)
             return None
-        if telemetry.ebs_status == EbsStatus.ACTIVATED:
-            self._transition_to_emergency(DiagnosticErrorCode.EBS_ACTIVATED_UNEXPECTED, now)
+        if tel.ebs_status == EbsStatus.ACTIVATED:
+            self._trip_emergency(DiagnosticErrorCode.EBS_ACTIVATED_UNEXPECTED, now)
             return None
 
-        # Check clean exit path to AS_Off: DSMS off & brakes released
-        if (not telemetry.dsms_status) and (not telemetry.brake_status):
-            self._transition_to_state(MacroState.AS_OFF, now)
+        # Clean exit: DSMS off & brakes released
+        if (not tel.dsms_status) and (not tel.brake_status):
+            self._set_state(MacroState.AS_OFF, tel, now)
             return None
 
-        elapsed_ready_time = now - self._ready_start_time
+        elapsed = now - self._ready_start_time
 
-        # Enforce 5-second lockout timer:
-        # Premature RES Go arrives before 5.0s -> latch premature flag to reject it
-        if elapsed_ready_time < AS_READY_LOCKOUT_DURATION_S:
-            if telemetry.res_go_signal:
+        # Enforce 5.0s lockout: any press before 5.0s is rejected
+        if elapsed < AS_READY_LOCKOUT_DURATION_S:
+            if tel.res_go_signal:
                 self._premature_res_detected = True
             return None
 
-        # At t >= 5.0s:
-        # If RES was pressed prematurely, operator must release it before a valid Go is accepted
+        # At t >= 5.0s: premature press must be released first
         if self._premature_res_detected:
-            if not telemetry.res_go_signal:
-                # Signal released; now clear premature flag so next press is valid
+            if not tel.res_go_signal:
                 self._premature_res_detected = False
             return None
 
-        # If fresh/valid RES Go signal is active and preconditions still hold -> AS_Driving
-        if telemetry.res_go_signal:
-            driving_preconditions = np.array([
-                telemetry.ebs_status == EbsStatus.ARMED,
-                telemetry.dsms_status,
-                telemetry.ts_status,
-                telemetry.sdc_status,
-                telemetry.dbs_check_ok,
-            ], dtype=bool)
-
-            if np.all(driving_preconditions):
-                self._transition_to_driving(telemetry, now)
+        # Valid fresh RES Go press -> AS_Driving
+        if tel.res_go_signal:
+            preconditions_hold = np.all([
+                tel.ebs_status == EbsStatus.ARMED,
+                tel.dsms_status,
+                tel.ts_status,
+                tel.sdc_status,
+                tel.dbs_check_ok,
+            ])
+            if preconditions_hold:
+                self._set_state(MacroState.AS_DRIVING, tel, now)
 
         return None
 
-    def _handle_as_driving(
-        self,
-        telemetry: VcuTelemetryMessage,
-        dt: float,
-        now: float,
-        external_actuation: Optional[ActuationCommandMessage],
+    def _step_as_driving(
+        self, tel: VcuTelemetryMessage, dt: float, now: float, external_cmd: Optional[ActuationCommandMessage]
     ) -> Optional[ActuationCommandMessage]:
-        # Check critical emergency conditions
-        if not telemetry.sdc_status:
-            self._transition_to_emergency(DiagnosticErrorCode.SDC_OPEN, now)
+        # Hardware fault checks
+        if not tel.sdc_status:
+            self._trip_emergency(DiagnosticErrorCode.SDC_OPEN, now)
             return None
-        if telemetry.ebs_status == EbsStatus.ACTIVATED:
-            self._transition_to_emergency(DiagnosticErrorCode.EBS_ACTIVATED_UNEXPECTED, now)
+        if tel.ebs_status == EbsStatus.ACTIVATED:
+            self._trip_emergency(DiagnosticErrorCode.EBS_ACTIVATED_UNEXPECTED, now)
             return None
-        if not telemetry.dsms_status:
-            self._transition_to_emergency(DiagnosticErrorCode.DSMS_UNEXPECTED_DROP, now)
+        if not tel.dsms_status:
+            self._trip_emergency(DiagnosticErrorCode.DSMS_UNEXPECTED_DROP, now)
             return None
-        if not telemetry.ts_status:
-            self._transition_to_emergency(DiagnosticErrorCode.TS_INACTIVE, now)
+        if not tel.ts_status:
+            self._trip_emergency(DiagnosticErrorCode.TS_INACTIVE, now)
             return None
 
         mission_time = now - self._mission_start_time
         context = MissionContext(
-            telemetry=telemetry,
+            telemetry=tel,
             dt=dt,
             mission_time=mission_time,
             current_substate=self._active_substate_name,
         )
 
-        substate_result: Optional[SubStateResult] = None
-        actuation_output: Optional[ActuationCommandMessage] = external_actuation
+        sub_result: Optional[SubStateResult] = None
+        cmd_out = external_cmd
 
         if self._active_mission_behavior is not None:
             try:
-                substate_result = self._active_mission_behavior.update(context)
-                if substate_result.next_substate is not None:
-                    self._active_substate_name = substate_result.next_substate
-                if substate_result.actuation_command is not None:
-                    actuation_output = substate_result.actuation_command
+                sub_result = self._active_mission_behavior.update(context)
+                if sub_result.next_substate is not None:
+                    self._active_substate_name = sub_result.next_substate
+                if sub_result.actuation_command is not None:
+                    cmd_out = sub_result.actuation_command
             except Exception:
-                self._transition_to_emergency(DiagnosticErrorCode.LEVEL2_EXCEPTION, now)
+                self._trip_emergency(DiagnosticErrorCode.LEVEL2_EXCEPTION, now)
                 return None
 
-        # Check if Level 2 requested an emergency stop
-        if substate_result is not None and substate_result.emergency_stop:
-            self._transition_to_emergency(DiagnosticErrorCode.LEVEL2_EXCEPTION, now)
+        # Level 2 emergency stop request
+        if sub_result is not None and sub_result.emergency_stop:
+            self._trip_emergency(DiagnosticErrorCode.LEVEL2_EXCEPTION, now)
             return None
 
-        # Check mission completion and standstill verification
-        level2_finished = (substate_result is not None and substate_result.mission_finished)
-        if level2_finished:
-            # Check continuous standstill over required duration via NumPy buffer
-            is_still = self._standstill_detector.is_standstill(
+        # Check mission completion & verified standstill -> AS_Finished
+        if sub_result is not None and sub_result.mission_finished:
+            if self._standstill_detector.is_standstill(
                 required_duration_s=STANDSTILL_MIN_DURATION_S,
                 threshold_mps=STANDSTILL_VELOCITY_THRESHOLD_MPS,
-            )
-            if is_still:
-                self._transition_to_state(MacroState.AS_FINISHED, now)
+            ):
+                self._set_state(MacroState.AS_FINISHED, tel, now)
                 return None
 
-        return actuation_output
+        return cmd_out
 
-    def _handle_as_finished(
-        self, telemetry: VcuTelemetryMessage, now: float
-    ) -> Optional[ActuationCommandMessage]:
-        # Engage EBS in AS_Finished per PDR & Flowchart
-        self._ebs_trigger_cmd = True
-        self._service_brake_cmd = False
-
-        # Clean exit to AS_Off: DSMS off & brakes released
-        if (not telemetry.dsms_status) and (not telemetry.brake_status):
-            self._transition_to_state(MacroState.AS_OFF, now)
-
+    def _step_as_finished(self, tel: VcuTelemetryMessage, now: float) -> Optional[ActuationCommandMessage]:
+        if (not tel.dsms_status) and (not tel.brake_status):
+            self._set_state(MacroState.AS_OFF, tel, now)
         return None
 
-    def _handle_as_emergency(
-        self, telemetry: VcuTelemetryMessage, now: float
-    ) -> Optional[ActuationCommandMessage]:
-        # Engage full EBS in emergency
-        self._ebs_trigger_cmd = True
-        self._service_brake_cmd = True
+    def _step_as_emergency(self, tel: VcuTelemetryMessage, now: float) -> Optional[ActuationCommandMessage]:
         return None
 
-    def _handle_manual_driving(
-        self, telemetry: VcuTelemetryMessage, now: float
-    ) -> Optional[ActuationCommandMessage]:
-        self._ebs_trigger_cmd = False
-        self._service_brake_cmd = False
-        # Exit to AS_Off when TS is switched off
-        if not telemetry.ts_status:
-            self._transition_to_state(MacroState.AS_OFF, now)
+    def _step_manual_driving(self, tel: VcuTelemetryMessage, now: float) -> Optional[ActuationCommandMessage]:
+        if not tel.ts_status:
+            self._set_state(MacroState.AS_OFF, tel, now)
         return None
 
     # -----------------------------------------------------------------------
-    # Transition Helpers
+    # Transition Logic
     # -----------------------------------------------------------------------
 
-    def _transition_to_state(self, new_state: MacroState, now: float) -> None:
-        """Execute state entry/exit transitions."""
+    def _set_state(self, new_state: MacroState, tel: VcuTelemetryMessage, now: float) -> None:
+        """Centralized state transition handler."""
         old_state = self._state
         self._state = new_state
         self._state_entry_time = now
+        self._dssi_status = STATE_DSSI_MAP[new_state]
 
-        # Map DSSI status
+        # Clean up any active mission if leaving AS_Driving
+        if old_state == MacroState.AS_DRIVING and new_state != MacroState.AS_DRIVING:
+            if self._active_mission_behavior is not None:
+                ctx = MissionContext(
+                    telemetry=tel,
+                    dt=0.0,
+                    mission_time=now - self._mission_start_time,
+                    current_substate=self._active_substate_name,
+                )
+                try:
+                    self._active_mission_behavior.on_exit(ctx, interrupted=(new_state == MacroState.AS_EMERGENCY))
+                except Exception:
+                    pass
+                if new_state == MacroState.AS_OFF:
+                    self._active_mission_behavior = None
+
+        # State entry side-effects
         if new_state == MacroState.AS_OFF:
-            self._dssi_status = DSSIStatus.OFF
             self._ebs_trigger_cmd = False
             self._service_brake_cmd = False
             self._active_substate_name = "NONE"
             self._premature_res_detected = False
-            if self._active_mission_behavior is not None:
-                self._active_mission_behavior.on_exit(
-                    MissionContext(
-                        telemetry=VcuTelemetryMessage(
-                            timestamp=now,
-                            ebs_status=EbsStatus.ARMED,
-                            dsms_status=False,
-                            dbs_check_ok=True,
-                            ts_status=False,
-                            ami_mission=Mission.NOT_SELECTED,
-                            brake_status=False,
-                            sdc_status=True,
-                            res_go_signal=False,
-                        ),
-                        dt=0.0,
-                        mission_time=0.0,
-                        current_substate=self._active_substate_name,
-                    ),
-                    interrupted=(old_state == MacroState.AS_EMERGENCY),
-                )
-                self._active_mission_behavior = None
 
         elif new_state == MacroState.AS_READY:
-            self._dssi_status = DSSIStatus.CONTINUOUS_YELLOW
             self._ready_start_time = now
             self._premature_res_detected = False
             self._service_brake_cmd = True
             self._ebs_trigger_cmd = False
 
+        elif new_state == MacroState.AS_DRIVING:
+            self._mission_start_time = now
+            self._service_brake_cmd = False
+            self._ebs_trigger_cmd = False
+            self._standstill_detector.reset()
+
+            self._active_mission_behavior = MissionRegistry.create(tel.ami_mission)
+            if self._active_mission_behavior is not None:
+                setattr(self._active_mission_behavior, "_mission_enum", tel.ami_mission)
+                sub_name = getattr(self._active_mission_behavior, "current_substate", "INIT")
+                self._active_substate_name = sub_name.value if hasattr(sub_name, "value") else str(sub_name)
+                ctx = MissionContext(telemetry=tel, dt=0.0, mission_time=0.0, current_substate=self._active_substate_name)
+                self._active_mission_behavior.on_enter(ctx)
+            else:
+                self._active_substate_name = "DRIVING_DEFAULT"
+
         elif new_state == MacroState.AS_FINISHED:
-            self._dssi_status = DSSIStatus.FLASHING_BLUE
             self._ebs_trigger_cmd = True
             self._service_brake_cmd = False
-            if self._active_mission_behavior is not None:
-                self._active_mission_behavior.on_exit(
-                    MissionContext(
-                        telemetry=VcuTelemetryMessage(
-                            timestamp=now,
-                            ebs_status=EbsStatus.ACTIVATED,
-                            dsms_status=True,
-                            dbs_check_ok=True,
-                            ts_status=True,
-                            ami_mission=Mission.NOT_SELECTED,
-                            brake_status=True,
-                            sdc_status=True,
-                            res_go_signal=False,
-                        ),
-                        dt=0.0,
-                        mission_time=now - self._mission_start_time,
-                        current_substate=self._active_substate_name,
-                    ),
-                    interrupted=False,
-                )
+
+        elif new_state == MacroState.AS_EMERGENCY:
+            self._ebs_trigger_cmd = True
+            self._service_brake_cmd = True
 
         elif new_state == MacroState.MANUAL_DRIVING:
-            self._dssi_status = DSSIStatus.OFF
             self._ebs_trigger_cmd = False
             self._service_brake_cmd = False
 
-    def _transition_to_driving(self, telemetry: VcuTelemetryMessage, now: float) -> None:
-        """Initialize driving state and instantiate Level 2 mission."""
-        self._state = MacroState.AS_DRIVING
-        self._dssi_status = DSSIStatus.FLASHING_YELLOW
-        self._state_entry_time = now
-        self._mission_start_time = now
-        self._service_brake_cmd = False
-        self._ebs_trigger_cmd = False
-        self._standstill_detector.reset()
-
-        # Instantiate mission handler if available
-        self._active_mission_behavior = MissionRegistry.create(telemetry.ami_mission)
-        if self._active_mission_behavior is not None:
-            setattr(self._active_mission_behavior, "_mission_enum", telemetry.ami_mission)
-            self._active_substate_name = getattr(
-                self._active_mission_behavior, "current_substate", "INIT"
-            )
-            if hasattr(self._active_substate_name, "value"):
-                self._active_substate_name = self._active_substate_name.value
-            context = MissionContext(
-                telemetry=telemetry,
-                dt=0.0,
-                mission_time=0.0,
-                current_substate=self._active_substate_name,
-            )
-            self._active_mission_behavior.on_enter(context)
-        else:
-            self._active_substate_name = "DRIVING_DEFAULT"
-
-    def _transition_to_emergency(self, fault: DiagnosticErrorCode, now: float) -> None:
-        """Latch into AS_Emergency with specific fault code."""
-        self._state = MacroState.AS_EMERGENCY
-        self._dssi_status = DSSIStatus.CONTINUOUS_BLUE
+    def _trip_emergency(self, fault: DiagnosticErrorCode, now: float) -> None:
+        """Latch into AS_Emergency immediately with fault bitmask."""
         self._error_code |= int(fault)
-        self._ebs_trigger_cmd = True
-        self._service_brake_cmd = True
-        self._state_entry_time = now
-
-        if self._active_mission_behavior is not None:
-            try:
-                self._active_mission_behavior.on_exit(
-                    MissionContext(
-                        telemetry=VcuTelemetryMessage(
-                            timestamp=now,
-                            ebs_status=EbsStatus.ACTIVATED,
-                            dsms_status=False,
-                            dbs_check_ok=False,
-                            ts_status=False,
-                            ami_mission=Mission.NOT_SELECTED,
-                            brake_status=True,
-                            sdc_status=False,
-                            res_go_signal=False,
-                        ),
-                        dt=0.0,
-                        mission_time=now - self._mission_start_time,
-                        current_substate=self._active_substate_name,
-                    ),
-                    interrupted=True,
-                )
-            except Exception:
-                pass
+        dummy_tel = VcuTelemetryMessage(timestamp=now, ebs_status=EbsStatus.ACTIVATED, dsms_status=False)
+        self._set_state(MacroState.AS_EMERGENCY, dummy_tel, now)
