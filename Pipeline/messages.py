@@ -1,6 +1,130 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import IntEnum, IntFlag
 from typing import Optional, List
 import numpy as np
+
+# ---------------------------------------------------------------------------
+# State Machine & VCU Enums
+# ---------------------------------------------------------------------------
+
+class MacroState(IntEnum):
+    """FSAE Driverless Level 1 Macro-States."""
+    AS_OFF = 0
+    AS_READY = 1
+    AS_DRIVING = 2
+    AS_FINISHED = 3
+    AS_EMERGENCY = 4
+    MANUAL_DRIVING = 5
+
+
+class ASSIStatus(IntEnum):
+    """Autonomous System Status Indicator (ASSI) light states."""
+    OFF = 0
+    CONTINUOUS_YELLOW = 1
+    FLASHING_YELLOW = 2
+    FLASHING_BLUE = 3
+    CONTINUOUS_BLUE = 4
+
+
+class EbsStatus(IntEnum):
+    """Emergency Brake System (EBS) hardware state."""
+    UNAVAILABLE = 0
+    ARMED = 1
+    ACTIVATED = 2
+
+
+class Mission(IntEnum):
+    """Autonomous Mission Indicator (AMI) mission selections."""
+    NOT_SELECTED = 0
+    MANUAL = 1
+    INSPECTION = 2
+    ACCELERATION = 3
+    SKIDPAD = 4
+    AUTOCROSS = 5
+    TRACKDRIVE = 6
+
+
+class DiagnosticErrorCode(IntFlag):
+    """Structured diagnostic fault bitmask flags for AS_Emergency."""
+    NONE = 0
+    SDC_OPEN = 1 << 0
+    EBS_ACTIVATED_UNEXPECTED = 1 << 1
+    WATCHDOG_TIMEOUT_VCU = 1 << 2
+    WATCHDOG_TIMEOUT_LEVEL2 = 1 << 3
+    LEVEL2_EXCEPTION = 1 << 4
+    DBS_CHECK_FAILED = 1 << 5
+    BRAKE_CHECK_FAILED = 1 << 6
+    TS_INACTIVE = 1 << 7
+    ASMS_UNEXPECTED_DROP = 1 << 8
+    STANDSTILL_TIMEOUT = 1 << 9
+    ACTUATION_LIMIT_EXCEEDED = 1 << 10
+    PRECONDITION_TIMEOUT = 1 << 11
+
+
+# ---------------------------------------------------------------------------
+# State Machine & Vehicle Control Messages
+# ---------------------------------------------------------------------------
+
+@dataclass
+class VcuTelemetryMessage:
+    """Inbound telemetry packet from the Vehicle Control Unit (VCU) bridge."""
+    timestamp: float
+    ebs_status: EbsStatus
+    asms_status: bool
+    dbs_check_ok: bool
+    ts_status: bool
+    ami_mission: Mission
+    brake_status: bool
+    sdc_status: bool
+    res_go_signal: bool
+    velocity: np.ndarray = field(default_factory=lambda: np.zeros(3, dtype=np.float64))
+
+    @property
+    def dsms_status(self) -> bool:
+        """Alias for asms_status per legacy FSAE naming conventions."""
+        return self.asms_status
+
+
+@dataclass
+class Level2StatusMessage:
+    """Internal Level 2 behavioral sub-state and execution status."""
+    timestamp: float
+    active_substate: str
+    mission_finished: bool
+    emergency_stop: bool
+    fault_flags: np.ndarray = field(default_factory=lambda: np.zeros(16, dtype=bool))
+    progress: float = 0.0
+
+
+@dataclass
+class ActuationCommandMessage:
+    """Outbound Level 3 low-level actuation commands."""
+    timestamp: float
+    steering: np.ndarray = field(default_factory=lambda: np.zeros(1, dtype=np.float64))
+    throttle: np.ndarray = field(default_factory=lambda: np.zeros(1, dtype=np.float64))
+    braking: np.ndarray = field(default_factory=lambda: np.zeros(1, dtype=np.float64))
+    gated: bool = False
+
+
+@dataclass
+class StateMachineStatusMessage:
+    """Outbound Level 1 state machine telemetry, diagnostics, and gate status."""
+    timestamp: float
+    current_state: MacroState
+    assi_status: ASSIStatus
+    error_code: int
+    error_flags: np.ndarray
+    heartbeat: int
+    ebs_trigger_cmd: bool
+    service_brake_cmd: bool
+    active_mission: Mission
+    active_substate: str
+    ready_timer_elapsed: float
+
+
+# ---------------------------------------------------------------------------
+# Perception, Planning, and Odometry Messages
+# ---------------------------------------------------------------------------
 
 @dataclass
 class FrameMessage:
