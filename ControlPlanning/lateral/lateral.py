@@ -1,7 +1,7 @@
 
 
-from pure_pursuit import PurePursuit
-from stanley import Stanley
+from lateral.pure_pursuit import PurePursuit
+from lateral.stanley import Stanley
 
 class Lateral():
     def __init__(self, K_dd=1.0, min_lookahead=2.0, wheelbase=2.5):
