@@ -67,15 +67,42 @@ def unpack_diagnostic_flags(error_code: int) -> np.ndarray:
 
 
 class Level1StateMachine:
-    """FSAE Driverless Level 1 Macro-State Machine.
-    
-    Governs mandatory competition safety states:
-    - AS_Off: System powered off / safe neutral.
-    - AS_Ready: Preconditions verified, 5.0s warning timer, service brake clamped.
-    - AS_Driving: Autonomous mission active, 50 Hz watchdogs, Level 3 gated.
-    - AS_Finished: Mission complete, verified standstill, EBS locked.
-    - AS_Emergency: Safety circuit open or critical fault; latched until manual reset.
-    - Manual_Driving: TS active with manual mission selected and DSMS off.
+    """Deterministic FSAE Driverless Level 1 macro-state machine.
+
+    Governs the mandatory competition safety states, driven by VCU telemetry
+    and gating Level 3 actuation commands from the active Level 2 mission:
+
+        AS_OFF: System powered off / safe neutral.
+        AS_READY: Preconditions verified, 5.0 s warning timer, service brake
+            clamped.
+        AS_DRIVING: Autonomous mission active, 50 Hz watchdogs, Level 3 gated.
+        AS_FINISHED: Mission complete, verified standstill, EBS locked.
+        AS_EMERGENCY: Safety circuit open or critical fault; latched until
+            manual reset.
+        MANUAL_DRIVING: TS active with manual mission selected and DSMS off.
+
+    Typical usage example:
+
+        state_machine = Level1StateMachine()
+        status, actuation = state_machine.step(telemetry=tel, external_actuation=cmd)
+
+    Args:
+        mission_behavior: Optional Level 2 mission to run on entering
+            AS_DRIVING. If None, the mission is created from the
+            MissionRegistry using the telemetry's AMI mission selection.
+
+    Attributes:
+        current_state: The active MacroState.
+        dssi_status: The DSSI light state for the active macro-state.
+        error_code: DiagnosticErrorCode bitmask of the latched faults.
+        heartbeat: Rolling counter incremented on each step, wrapping at
+            HEARTBEAT_MAX.
+        ready_timer_elapsed: Seconds spent in AS_READY, or 0.0 in any other
+            state.
+        active_mission: The Mission being executed, or None if no mission
+            is active.
+        active_substate_name: Name of the active Level 2 sub-state, or
+            "NONE".
     """
 
     def __init__(self, mission_behavior: Optional[MissionBehavior] = None) -> None:
@@ -147,18 +174,41 @@ class Level1StateMachine:
     # -----------------------------------------------------------------------
 
     def request_emergency_trip(self, fault: DiagnosticErrorCode, timestamp: float) -> None:
-        """Trip immediately into AS_Emergency with specific fault code."""
+        """Trips the state machine immediately into AS_EMERGENCY.
+
+        The trip is unconditional, since entering a safer state is never
+        blocked. The fault is OR'ed into the latched error code, so earlier
+        faults are preserved. If already in AS_EMERGENCY, the fault is still
+        recorded but no transition occurs.
+
+        Args:
+            fault: Diagnostic fault flag(s) to latch into the error code.
+            timestamp: Time of the fault in seconds, used as the AS_EMERGENCY
+                entry time and for logging.
+        """
         self._trip_emergency(fault, timestamp)
 
     def can_reset(self, telemetry: VcuTelemetryMessage) -> bool:
-        """Evaluate whether telemetry satisfies all emergency reset preconditions.
-        
-        Per FSAE rules and flowchart.png:
-        Transition requires: EBS Sound Off & ASMS (DSMS) Off & Brakes Released.
-        Note: The vehicle horn / acoustic warning buzzer is managed directly by
-        VCU hardware firmware and silences after the mandated countdown. The CAN
-        bridge enforces this reset safety invariant via ebs_status != ACTIVATED,
-        dsms_status == False, brake_status == False, and sdc_status == True.
+        """Checks whether telemetry satisfies all emergency reset preconditions.
+
+        Per the FSAE rules, leaving AS_EMERGENCY requires EBS sound off,
+        ASMS (DSMS) off, and brakes released. The acoustic warning buzzer is
+        managed directly by VCU firmware and silences after the mandated
+        countdown, so the CAN bridge expresses these conditions through the
+        telemetry fields checked below.
+
+        This method has no side effects; use request_reset() to perform the
+        reset.
+
+        Args:
+            telemetry: Latest VCU telemetry snapshot.
+
+        Returns:
+            True if the state machine is in AS_EMERGENCY and all of the
+            following hold: ebs_status is not ACTIVATED, dsms_status is
+            False, brake_status is False, and sdc_status is True. False
+            otherwise, including whenever the current state is not
+            AS_EMERGENCY.
         """
         return (
             self._state == MacroState.AS_EMERGENCY
@@ -169,7 +219,21 @@ class Level1StateMachine:
         )
 
     def request_reset(self, telemetry: VcuTelemetryMessage) -> bool:
-        """Attempt to clear AS_Emergency latch and return to AS_Off."""
+        """Attempts to clear the AS_EMERGENCY latch and return to AS_OFF.
+
+        On success, all latched faults are cleared and the AS_OFF entry
+        actions run (brake and EBS commands released, active sub-state name
+        cleared). On rejection, the state is unchanged and the reset-relevant
+        telemetry fields (EBS, DSMS, brake, SDC) are logged as a warning.
+
+        Args:
+            telemetry: Latest VCU telemetry snapshot. Its timestamp is used as
+                the AS_OFF entry time.
+
+        Returns:
+            True if the reset was accepted, False if any precondition checked
+            by can_reset() was not met.
+        """
         if self.can_reset(telemetry):
             logger.info("EMERGENCY RESET ACCEPTED at t=%.3fs: returning to AS_OFF", telemetry.timestamp)
             self._error_code = DiagnosticErrorCode.NONE
@@ -195,7 +259,48 @@ class Level1StateMachine:
         telemetry: VcuTelemetryMessage,
         external_actuation: Optional[ActuationCommandMessage] = None,
     ) -> Tuple[StateMachineStatusMessage, ActuationCommandMessage]:
-        """Execute one 50 Hz state machine cycle."""
+        """Executes one 50 Hz state machine cycle.
+
+        Each call runs the following stages in order:
+
+            1. Bookkeeping: advances the heartbeat and pushes the telemetry
+               velocity into the standstill buffer.
+            2. VCU watchdog: in AS_READY, AS_DRIVING, or AS_FINISHED, trips
+               WATCHDOG_TIMEOUT_VCU if the gap since the previous call
+               exceeds VCU_WATCHDOG_TIMEOUT_S.
+            3. State logic: runs the handler for the current state, which may
+               perform at most one transition and returns a candidate
+               actuation command, i.e. the command requested before safety
+               gating. Only AS_DRIVING produces a non-None candidate.
+            4. Gating: passes the candidate through ActuationGatekeeper using
+               the post-transition state, which clamps it, replaces it with a
+               safe braking command, or discards it. A fault tripped during
+               this cycle is therefore enforced on this cycle's output.
+
+        All time is taken from telemetry.timestamp rather than the system
+        clock, so replaying the same telemetry sequence is deterministic.
+        Exceptions raised by the Level 2 mission's update() are caught and
+        latched as LEVEL2_EXCEPTION rather than propagated; exceptions from
+        its on_enter() are not (see _set_state()).
+
+        Args:
+            telemetry: Latest VCU telemetry snapshot. Timestamps must be
+                monotonically increasing across calls. On the first call, dt
+                defaults to STATE_MACHINE_DEFAULT_DT_S.
+            external_actuation: Latest command from an external Level 2
+                planner, or None. Only used in AS_DRIVING, where an internal
+                mission's command takes precedence. With no internal mission,
+                a missing command or one older than LEVEL2_WATCHDOG_TIMEOUT_S
+                trips WATCHDOG_TIMEOUT_LEVEL2.
+
+        Returns:
+            A tuple (status, actuation) where status is the
+            StateMachineStatusMessage describing the state, DSSI, latched
+            faults, and brake/EBS commands after this cycle, and actuation is
+            the gated ActuationCommandMessage that is safe to send to the VCU.
+            actuation.gated is True only if a Level 2 command was passed
+            through (clamped) in AS_DRIVING.
+        """
         now = telemetry.timestamp
         dt = (now - self._last_tick_time) if self._last_tick_time is not None else STATE_MACHINE_DEFAULT_DT_S
         self._last_tick_time = now
@@ -255,6 +360,22 @@ class Level1StateMachine:
     # -----------------------------------------------------------------------
 
     def _step_as_off(self, tel: VcuTelemetryMessage, now: float) -> Optional[ActuationCommandMessage]:
+        """Evaluates AS_OFF exit conditions.
+
+        MANUAL_DRIVING is checked first and takes priority: it is entered when
+        the manual mission is selected, EBS is UNAVAILABLE, DSMS is off, and TS
+        is active. Otherwise AS_READY is entered when EBS is ARMED, DSMS is
+        on, the DBS check passed, TS is active, a mission in
+        VALID_DRIVERLESS_MISSIONS is selected, the brakes are engaged, and
+        SDC is closed.
+
+        Args:
+            tel: Latest VCU telemetry snapshot.
+            now: Current time in seconds, from tel.timestamp.
+
+        Returns:
+            Always None, as no actuation is requested in AS_OFF.
+        """
         # Check Manual Driving transition
         if tel.ami_mission == Mission.MANUAL and tel.ebs_status == EbsStatus.UNAVAILABLE and not tel.dsms_status and tel.ts_status:
             self._set_state(MacroState.MANUAL_DRIVING, tel, now)
@@ -276,6 +397,32 @@ class Level1StateMachine:
         return None
 
     def _step_as_ready(self, tel: VcuTelemetryMessage, now: float) -> Optional[ActuationCommandMessage]:
+        """Evaluates AS_READY faults, exit, and the RES Go start sequence.
+
+        Checks run in priority order:
+
+            1. Faults: an open SDC trips SDC_OPEN, and an activated EBS trips
+               EBS_ACTIVATED_UNEXPECTED.
+            2. Clean exit: DSMS off with brakes released returns to AS_OFF.
+            3. Lockout: RES Go is ignored until AS_READY_LOCKOUT_DURATION_S
+               has elapsed since entry. A press during the lockout is
+               remembered as premature.
+            4. Premature press: after the lockout, a premature press must be
+               released before a new press is accepted, so holding RES Go
+               through the lockout cannot start the mission.
+            5. Start: a fresh RES Go press enters AS_DRIVING if EBS is ARMED,
+               DSMS is on, TS is active, SDC is closed, and the DBS check
+               passed. If these do not all hold, the press is ignored and the
+               state remains AS_READY.
+
+        Args:
+            tel: Latest VCU telemetry snapshot.
+            now: Current time in seconds, from tel.timestamp.
+
+        Returns:
+            Always None. The service brake hold in AS_READY is applied by
+            ActuationGatekeeper.
+        """
         # Critical safety trips
         if not tel.sdc_status:
             self._trip_emergency(DiagnosticErrorCode.SDC_OPEN, now)
@@ -320,6 +467,38 @@ class Level1StateMachine:
     def _step_as_driving(
         self, tel: VcuTelemetryMessage, dt: float, now: float, external_cmd: Optional[ActuationCommandMessage]
     ) -> Optional[ActuationCommandMessage]:
+        """Monitors faults, runs the Level 2 mission, and selects the command.
+
+        Checks run in priority order, and any fault trips AS_EMERGENCY and
+        returns None immediately:
+
+            1. Hardware faults: open SDC (SDC_OPEN), activated EBS
+               (EBS_ACTIVATED_UNEXPECTED), DSMS dropped (DSMS_UNEXPECTED_DROP),
+               or TS inactive (TS_INACTIVE).
+            2. Level 2 mission: with an active internal mission, calls its
+               update() and applies the returned sub-state and command. An
+               exception from update() trips LEVEL2_EXCEPTION. With no
+               internal mission, a missing external command or one older
+               than LEVEL2_WATCHDOG_TIMEOUT_S trips WATCHDOG_TIMEOUT_LEVEL2.
+            3. Emergency stop: a mission result with emergency_stop set trips
+               LEVEL2_EXCEPTION.
+            4. Completion: a mission result with mission_finished set enters
+               AS_FINISHED only once the standstill detector confirms speed
+               below STANDSTILL_VELOCITY_THRESHOLD_MPS for at least
+               STANDSTILL_MIN_DURATION_S. Until then, driving continues.
+
+        Args:
+            tel: Latest VCU telemetry snapshot.
+            dt: Seconds since the previous step, passed to the mission.
+            now: Current time in seconds, from tel.timestamp.
+            external_cmd: Latest command from an external Level 2 planner,
+                or None.
+
+        Returns:
+            The candidate actuation command: the internal mission's command
+            if it returned one, otherwise external_cmd. None if a fault was
+            tripped or AS_FINISHED was entered this cycle.
+        """
         # Hardware fault checks
         if not tel.sdc_status:
             self._trip_emergency(DiagnosticErrorCode.SDC_OPEN, now)
@@ -379,14 +558,49 @@ class Level1StateMachine:
         return cmd_out
 
     def _step_as_finished(self, tel: VcuTelemetryMessage, now: float) -> Optional[ActuationCommandMessage]:
+        """Returns to AS_OFF once DSMS is off and the brakes are released.
+
+        No hardware fault checks run in this state; only the VCU watchdog in
+        step() applies.
+
+        Args:
+            tel: Latest VCU telemetry snapshot.
+            now: Current time in seconds, from tel.timestamp.
+
+        Returns:
+            Always None. The EBS hold in AS_FINISHED is applied by
+            ActuationGatekeeper.
+        """
         if (not tel.dsms_status) and (not tel.brake_status):
             self._set_state(MacroState.AS_OFF, tel, now)
         return None
 
     def _step_as_emergency(self, tel: VcuTelemetryMessage, now: float) -> Optional[ActuationCommandMessage]:
+        """Holds the AS_EMERGENCY latch.
+
+        No transition is evaluated here. The only exit is an accepted
+        request_reset().
+
+        Args:
+            tel: Latest VCU telemetry snapshot (unused).
+            now: Current time in seconds (unused).
+
+        Returns:
+            Always None. The EBS hold in AS_EMERGENCY is applied by
+            ActuationGatekeeper.
+        """
         return None
 
     def _step_manual_driving(self, tel: VcuTelemetryMessage, now: float) -> Optional[ActuationCommandMessage]:
+        """Returns to AS_OFF once the tractive system is inactive.
+
+        Args:
+            tel: Latest VCU telemetry snapshot.
+            now: Current time in seconds, from tel.timestamp.
+
+        Returns:
+            Always None, as the driver controls the vehicle directly.
+        """
         if not tel.ts_status:
             self._set_state(MacroState.AS_OFF, tel, now)
         return None
@@ -396,7 +610,41 @@ class Level1StateMachine:
     # -----------------------------------------------------------------------
 
     def _set_state(self, new_state: MacroState, tel: VcuTelemetryMessage, now: float) -> None:
-        """Centralized state transition handler."""
+        """Performs a state transition and its exit and entry side effects.
+
+        This is the only method that writes the state. A transition to the
+        current state is a no-op. Otherwise, in order:
+
+            1. Logs the transition and updates the state, entry time, and
+               DSSI status.
+            2. Leaving AS_DRIVING: calls the active mission's on_exit(), with
+               interrupted=True if entering AS_EMERGENCY. Exceptions from
+               on_exit() are logged and suppressed. On entering AS_OFF, the
+               active mission is reset to the injected one, if any.
+            3. Runs the entry actions for the new state:
+
+                AS_OFF: releases EBS and service brake commands, clears the
+                    sub-state name and premature RES flag.
+                AS_READY: starts the ready timer, clears the premature RES
+                    flag, engages the service brake.
+                AS_DRIVING: starts the mission timer, releases brakes, resets
+                    the standstill detector, then selects the injected
+                    mission or creates one from MissionRegistry for the
+                    selected AMI mission and calls its on_enter(). With no
+                    mission, the sub-state name is set to "DRIVING_DEFAULT".
+                AS_FINISHED: triggers EBS, releases the service brake.
+                AS_EMERGENCY: triggers EBS and engages the service brake.
+                MANUAL_DRIVING: releases EBS and service brake commands.
+
+        Unlike on_exit(), exceptions from on_enter() are not caught and
+        propagate out of step() with the state already set to AS_DRIVING.
+
+        Args:
+            new_state: State to transition to.
+            tel: Telemetry used for logging, mission contexts, and mission
+                selection on entering AS_DRIVING.
+            now: Current time in seconds, used as the state entry time.
+        """
         old_state = self._state
         if old_state == new_state:
             return
@@ -477,7 +725,22 @@ class Level1StateMachine:
             self._service_brake_cmd = False
 
     def _trip_emergency(self, fault: DiagnosticErrorCode, now: float) -> None:
-        """Latch into AS_Emergency immediately with fault bitmask."""
+        """Latches the fault and transitions to AS_EMERGENCY.
+
+        The fault is OR'ed into the error code before transitioning, so it is
+        recorded even when already in AS_EMERGENCY (where the transition is a
+        no-op). Logs the fault and accumulated bitmask at CRITICAL level.
+
+        The transition uses a synthetic telemetry message (EBS ACTIVATED,
+        DSMS off, all other fields at their defaults) rather than the real
+        telemetry. The mission name in the transition log and the telemetry
+        in the mission's on_exit() context therefore come from those
+        defaults, not from the vehicle.
+
+        Args:
+            fault: Diagnostic fault flag(s) to latch.
+            now: Current time in seconds, used as the AS_EMERGENCY entry time.
+        """
         self._error_code |= int(fault)
         fault_name = fault.name if hasattr(fault, "name") else str(fault)
         logger.critical(
