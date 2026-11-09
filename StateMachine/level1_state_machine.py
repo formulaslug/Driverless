@@ -199,11 +199,12 @@ class Level1StateMachine:
         # Update standstill buffer with incoming velocity
         self._standstill_detector.push(now, telemetry.velocity)
 
-        # Check VCU watchdog if we have prior telemetry
-        if self._last_vcu_telemetry_time is not None:
-            time_since_vcu = now - self._last_vcu_telemetry_time
-            if time_since_vcu > VCU_WATCHDOG_TIMEOUT_S and self._state != MacroState.AS_OFF:
-                self._transition_to_emergency(DiagnosticErrorCode.WATCHDOG_TIMEOUT_VCU, now)
+        # Check VCU watchdog for active autonomous states (AS_Ready, AS_Driving, AS_Finished)
+        if self._state not in (MacroState.AS_OFF, MacroState.MANUAL_DRIVING):
+            if self._last_vcu_telemetry_time is not None:
+                time_since_vcu = now - self._last_vcu_telemetry_time
+                if time_since_vcu > VCU_WATCHDOG_TIMEOUT_S:
+                    self._transition_to_emergency(DiagnosticErrorCode.WATCHDOG_TIMEOUT_VCU, now)
         self._last_vcu_telemetry_time = now
 
         # Execute state-specific logic

@@ -1,0 +1,168 @@
+"""Unit tests verifying all Level 1 macro-state transitions and guards."""
+
+import pytest
+import numpy as np
+
+from messages import (
+    MacroState,
+    ASSIStatus,
+    EbsStatus,
+    Mission,
+    DiagnosticErrorCode,
+    VcuTelemetryMessage,
+)
+from StateMachine.level1_state_machine import Level1StateMachine
+from StateMachine.tests.conftest import make_ready_telemetry
+
+
+def test_initial_state_is_as_off(state_machine: Level1StateMachine, base_telemetry: VcuTelemetryMessage) -> None:
+    """System initializes in AS_Off with ASSI Off and no error codes."""
+    status, act = state_machine.step(base_telemetry)
+    assert status.current_state == MacroState.AS_OFF
+    assert status.assi_status == ASSIStatus.OFF
+    assert status.error_code == DiagnosticErrorCode.NONE
+    assert not status.ebs_trigger_cmd
+    assert not status.service_brake_cmd
+
+
+def test_transition_as_off_to_as_ready(state_machine: Level1StateMachine) -> None:
+    """Validates transition from AS_Off to AS_Ready when all preconditions hold."""
+    tel = make_ready_telemetry(timestamp=1.0)
+    status, act = state_machine.step(tel)
+
+    assert status.current_state == MacroState.AS_READY
+    assert status.assi_status == ASSIStatus.CONTINUOUS_YELLOW
+    assert status.service_brake_cmd is True
+    assert status.ebs_trigger_cmd is False
+
+
+@pytest.mark.parametrize(
+    "missing_condition_patch",
+    [
+        {"ebs_status": EbsStatus.ACTIVATED},
+        {"ebs_status": EbsStatus.UNAVAILABLE},
+        {"asms_status": False},
+        {"dbs_check_ok": False},
+        {"ts_status": False},
+        {"ami_mission": Mission.NOT_SELECTED},
+        {"brake_status": False},
+        {"sdc_status": False},
+    ],
+)
+def test_as_off_stays_in_off_if_any_precondition_missing(
+    state_machine: Level1StateMachine, missing_condition_patch: dict
+) -> None:
+    """Missing any single readiness precondition prevents transition to AS_Ready."""
+    params = {
+        "timestamp": 1.0,
+        "ebs_status": EbsStatus.ARMED,
+        "asms_status": True,
+        "dbs_check_ok": True,
+        "ts_status": True,
+        "ami_mission": Mission.INSPECTION,
+        "brake_status": True,
+        "sdc_status": True,
+        "res_go_signal": False,
+        "velocity": np.zeros(3, dtype=np.float64),
+    }
+    params.update(missing_condition_patch)
+    tel = VcuTelemetryMessage(**params)
+
+    status, _ = state_machine.step(tel)
+    assert status.current_state == MacroState.AS_OFF
+    assert status.assi_status == ASSIStatus.OFF
+
+
+def test_manual_driving_transition(state_machine: Level1StateMachine) -> None:
+    """Transition to and from Manual Driving mode."""
+    # Manual conditions: Manual mission & EBS unavailable & ASMS off & TS active
+    manual_tel = VcuTelemetryMessage(
+        timestamp=1.0,
+        ebs_status=EbsStatus.UNAVAILABLE,
+        asms_status=False,
+        dbs_check_ok=True,
+        ts_status=True,
+        ami_mission=Mission.MANUAL,
+        brake_status=False,
+        sdc_status=True,
+        res_go_signal=False,
+        velocity=np.zeros(3, dtype=np.float64),
+    )
+    status, _ = state_machine.step(manual_tel)
+    assert status.current_state == MacroState.MANUAL_DRIVING
+    assert status.assi_status == ASSIStatus.OFF
+
+    # When TS turns off, return to AS_Off
+    manual_tel.timestamp = 1.02
+    manual_tel.ts_status = False
+    status, _ = state_machine.step(manual_tel)
+    assert status.current_state == MacroState.AS_OFF
+
+
+def test_transition_as_ready_to_as_off(state_machine: Level1StateMachine) -> None:
+    """AS_Ready transitions cleanly back to AS_Off when ASMS is switched off and brakes released."""
+    tel = make_ready_telemetry(timestamp=1.0)
+    status, _ = state_machine.step(tel)
+    assert status.current_state == MacroState.AS_READY
+
+    # Turn ASMS off and release brakes at next cycle
+    tel.timestamp = 1.02
+    tel.asms_status = False
+    tel.brake_status = False
+    status, _ = state_machine.step(tel)
+    assert status.current_state == MacroState.AS_OFF
+    assert status.assi_status == ASSIStatus.OFF
+
+
+def test_cannot_skip_ready_straight_to_driving(state_machine: Level1StateMachine) -> None:
+    """Sending RES Go while in AS_Off cannot bypass AS_Ready to jump to AS_Driving."""
+    tel = make_ready_telemetry(timestamp=1.0, res_go=True)
+    status, _ = state_machine.step(tel)
+    # The car enters AS_Ready, but MUST NOT be in AS_Driving
+    assert status.current_state == MacroState.AS_READY
+    assert status.current_state != MacroState.AS_DRIVING
+
+
+def test_transition_as_finished_to_as_off(state_machine: Level1StateMachine) -> None:
+    """From AS_Finished, turning ASMS off and releasing brakes transitions to AS_Off."""
+    # Enter AS_Ready
+    t = 1.0
+    state_machine.step(make_ready_telemetry(timestamp=t))
+
+    # Advance past 5.0s lockout
+    for _ in range(260):
+        t += 0.02
+        state_machine.step(make_ready_telemetry(timestamp=t))
+
+    # Enter AS_Driving
+    t += 0.02
+    state_machine.step(make_ready_telemetry(timestamp=t, res_go=True))
+    assert state_machine.current_state == MacroState.AS_DRIVING
+
+    # Advance inspection mission until complete and standstill detected
+    for _ in range(600):
+        t += 0.02
+        status, _ = state_machine.step(make_ready_telemetry(timestamp=t, velocity=0.0))
+        if status.current_state == MacroState.AS_FINISHED:
+            break
+
+    assert state_machine.current_state == MacroState.AS_FINISHED
+    assert state_machine.assi_status == ASSIStatus.FLASHING_BLUE
+
+    # Exit to AS_Off
+    t += 0.02
+    exit_tel = VcuTelemetryMessage(
+        timestamp=t,
+        ebs_status=EbsStatus.ACTIVATED,
+        asms_status=False,
+        dbs_check_ok=True,
+        ts_status=False,
+        ami_mission=Mission.NOT_SELECTED,
+        brake_status=False,
+        sdc_status=True,
+        res_go_signal=False,
+        velocity=np.zeros(3, dtype=np.float64),
+    )
+    status, _ = state_machine.step(exit_tel)
+    assert status.current_state == MacroState.AS_OFF
+    assert status.assi_status == ASSIStatus.OFF

@@ -75,6 +75,27 @@ class InspectionMission(MissionBehavior):
         """Compute open-loop test commands for the current tick."""
         t_sub = context.mission_time - self._substate_start_time
 
+        # Check sub-state transitions prior to command computation
+        if self._substate == InspectionSubState.STEERING_SWEEP:
+            if t_sub >= self.STEER_SWEEP_DURATION_S:
+                self._substate = InspectionSubState.POWERTRAIN_RAMP
+                self._substate_start_time = context.mission_time
+                t_sub = 0.0
+
+        elif self._substate == InspectionSubState.POWERTRAIN_RAMP:
+            if t_sub >= self.POWERTRAIN_DURATION_S:
+                self._substate = InspectionSubState.CONTROLLED_STOP
+                self._substate_start_time = context.mission_time
+                t_sub = 0.0
+
+        elif self._substate == InspectionSubState.CONTROLLED_STOP:
+            v_x = float(context.telemetry.velocity[0])
+            is_still = abs(v_x) < self.STANDSTILL_THRESHOLD_MPS
+            if (is_still and t_sub >= 0.5) or (t_sub >= self.BRAKING_TIMEOUT_S):
+                self._substate = InspectionSubState.COMPLETE
+                self._substate_start_time = context.mission_time
+                t_sub = 0.0
+
         steering = np.zeros(1, dtype=np.float64)
         throttle = np.zeros(1, dtype=np.float64)
         braking = np.zeros(1, dtype=np.float64)
@@ -87,10 +108,6 @@ class InspectionMission(MissionBehavior):
             )
             throttle[0] = 0.0
             braking[0] = 0.0
-
-            if t_sub >= self.STEER_SWEEP_DURATION_S:
-                self._substate = InspectionSubState.POWERTRAIN_RAMP
-                self._substate_start_time = context.mission_time
 
         elif self._substate == InspectionSubState.POWERTRAIN_RAMP:
             # Trapezoidal throttle ramp
@@ -108,24 +125,11 @@ class InspectionMission(MissionBehavior):
                     self.THROTTLE_PEAK_NORM * (remaining / self.THROTTLE_RAMP_DOWN_S),
                 )
 
-            if t_sub >= self.POWERTRAIN_DURATION_S:
-                self._substate = InspectionSubState.CONTROLLED_STOP
-                self._substate_start_time = context.mission_time
-
         elif self._substate == InspectionSubState.CONTROLLED_STOP:
             # Controlled stop to standstill
             steering[0] = 0.0
             throttle[0] = 0.0
             braking[0] = self.BRAKE_STOP_NORM
-
-            # Check if vehicle has come to standstill or braking timed out
-            v_x = float(context.telemetry.velocity[0])
-            is_still = abs(v_x) < self.STANDSTILL_THRESHOLD_MPS
-
-            if (is_still and t_sub >= 0.5) or (t_sub >= self.BRAKING_TIMEOUT_S):
-                self._substate = InspectionSubState.COMPLETE
-                self._substate_start_time = context.mission_time
-                mission_finished = True
 
         elif self._substate == InspectionSubState.COMPLETE:
             steering[0] = 0.0
