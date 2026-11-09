@@ -20,5 +20,5 @@ class Controller:
 
     def update(self, x, y, yaw, v, t, v_desired, waypoints):
         a_des = self.longitudinal.update_des_accel(v, v_desired, t)
-        curvature = self.lateral.pure_pursuit.update(waypoints, x, y, yaw, v)
+        curvature = self.lateral.pure_pursuit.update_curvature(waypoints, x, y, yaw, v)
         return a_des, curvature
