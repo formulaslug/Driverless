@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import numpy as np
+from config import MAX_ACCEL, MAX_BRAKE
 
 @dataclass
 class Gains:
@@ -16,6 +17,7 @@ class PID:
         self.t_prev : float = 0.0
         self.v : float = 0.0
         self.v_prev : float = 0.0
+        self.a_des_prev : float = 0.0
         self.error_prev : float = 0.0
         self.net_integral : float = 0.0
         self.intialized : bool = False
@@ -50,12 +52,6 @@ class PID:
         self.dkaw : float = 0.0
 
         self.t_ramp_end : float = 0.0
-
-    def calc_possible_output(self):
-        """
-        calculates the actual possible output for the car, not raw pid
-        """
-        pass
 
     def find_rise_time(self, t, v, v_desired):
         """
@@ -98,7 +94,7 @@ class PID:
             (target.KAW - g.KAW) / time_to_change
         )
 
-    def change_gains(self, t):
+    def change_gains(self, t, dt):
         """
         Starts changing our gains gradually over time, transient-free
         """
@@ -115,27 +111,27 @@ class PID:
         g = self.gains
         r = self.rate
         self.gains = Gains(
-            g.KP + r.KP,
-            g.KI + r.KI,
-            g.KD + r.KD ,
-            g.KAW + r.KAW
+            g.KP + r.KP * dt,
+            g.KI + r.KI * dt,
+            g.KD + r.KD * dt,
+            g.KAW + r.KAW * dt
         )
 
     def print_gains(self):
         print(f"KP: {self.gains.KP}\nKI: {self.gains.KI}\nKD: {self.gains.KD}\nKAW: {self.gains.KAW}\n")
     
-    def gain_schedule(self, sm_in, t):
+    def gain_schedule(self, sm_in, t, dt):
         # Gain Profiles based on input from State Machine
         if sm_in == 0:
             if (self.target is None):
                 self.start_gain_change(self.PROFILES[0], t, 5.0)
-            self.change_gains(t)
+            self.change_gains(t, dt)
         elif sm_in == 1:
             if (self.target is None):
                 self.start_gain_change(self.PROFILES[1], t, 5.0)
-            self.change_gains(t)
+            self.change_gains(t, dt)
 
-    def update(self, v, v_desired, t):
+    def update_des_accel(self, v, v_desired, t):
         """
         PID longitudinal algorithm, updating state variables, and desired accel
         """
@@ -143,25 +139,37 @@ class PID:
         error = v_desired - v
         if not self.intialized:
             dt = 0.01
+            self.v_prev = v
             self.intialized = True
+        elif t - self.t_prev < 0.001:
+            return self.a_des_prev
         else:
             dt = t - self.t_prev
 
-        self.net_integral += error * dt
-
-        P = error
-        I = self.net_integral
-        D = (error - self.error_prev) / dt
+        P = error * self.gains.KP
+        D = -(v - self.v_prev) / dt * self.gains.KD # prevent deritive kick
+        # D = (error - self.error_prev) / dt * self.gains.KD
 
         # raw_output = self.K_p * P + self.K_i * I + self.K_d * D
-        raw_output = self.gains.KP * P + self.gains.KI * I + self.gains.KD * D
 
-        # self.gain_schedule(sm_in=0, t=t)
+        # Integral Clamp
+        I_check = self.gains.KI * (self.net_integral + error * dt)
+        check_output = P + I_check + D
+        max_output = MAX_ACCEL
+        min_output = MAX_BRAKE
 
-        # add backcalculation for integral windup here
-        # possible_output = self.calc_possible_output() #calculates the possible output
-        # back_calculation = self.K_aw * (possible_output - raw_output) #back calculation for integral windup
-        # self.net_integral -= dt * self.K_i * back_calculation #back calculation for integral windup
+        saturated_high = check_output >= max_output and error > 0
+        saturated_low = check_output <= min_output and error < 0
+
+        if not (saturated_high or saturated_low):
+            self.net_integral += error * dt
+
+        I = self.gains.KI * self.net_integral
+
+        # PID raw output
+        a_des = P + I + D
+        a_des = np.clip(a_des, min_output, max_output)
+        # self.gain_schedule(sm_in=0, t=t, dt=dt)
 
         # Find Rise Time
         if (not self.rise_time_defined):
@@ -172,8 +180,9 @@ class PID:
         self.v_lower_bound = v_desired * 0.99
         self.find_settle_time(v=v, t=t)
 
-        return raw_output
-        # return a_des 
-
-
-    
+        # Update state variables
+        self.t_prev = t
+        self.v_prev = v
+        self.error_prev = error
+        self.a_des_prev = a_des
+        return a_des 
