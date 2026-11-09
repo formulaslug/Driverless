@@ -8,3 +8,8 @@
 /DepthEstimation/weights
 /SampleData/driverless.mp4
 *.txt
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
