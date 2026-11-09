@@ -17,7 +17,7 @@ from messages import (
     EbsStatus,
     Mission,
     MacroState,
-    ASSIStatus,
+    DSSIStatus,
     DiagnosticErrorCode,
     VcuTelemetryMessage,
     ActuationCommandMessage,
@@ -37,7 +37,7 @@ def base_telemetry() -> VcuTelemetryMessage:
     return VcuTelemetryMessage(
         timestamp=0.0,
         ebs_status=EbsStatus.ARMED,
-        asms_status=False,
+        dsms_status=False,
         dbs_check_ok=True,
         ts_status=False,
         ami_mission=Mission.NOT_SELECTED,
@@ -58,7 +58,7 @@ def make_ready_telemetry(
     return VcuTelemetryMessage(
         timestamp=timestamp,
         ebs_status=EbsStatus.ARMED,
-        asms_status=True,
+        dsms_status=True,
         dbs_check_ok=True,
         ts_status=True,
         ami_mission=mission,

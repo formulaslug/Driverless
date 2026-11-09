@@ -17,8 +17,8 @@ class MacroState(IntEnum):
     MANUAL_DRIVING = 5
 
 
-class ASSIStatus(IntEnum):
-    """Autonomous System Status Indicator (ASSI) light states."""
+class DSSIStatus(IntEnum):
+    """Driverless System Status Indicator (DSSI) light states."""
     OFF = 0
     CONTINUOUS_YELLOW = 1
     FLASHING_YELLOW = 2
@@ -55,7 +55,7 @@ class DiagnosticErrorCode(IntFlag):
     DBS_CHECK_FAILED = 1 << 5
     BRAKE_CHECK_FAILED = 1 << 6
     TS_INACTIVE = 1 << 7
-    ASMS_UNEXPECTED_DROP = 1 << 8
+    DSMS_UNEXPECTED_DROP = 1 << 8
     STANDSTILL_TIMEOUT = 1 << 9
     ACTUATION_LIMIT_EXCEEDED = 1 << 10
     PRECONDITION_TIMEOUT = 1 << 11
@@ -70,19 +70,14 @@ class VcuTelemetryMessage:
     """Inbound telemetry packet from the Vehicle Control Unit (VCU) bridge."""
     timestamp: float
     ebs_status: EbsStatus
-    asms_status: bool
-    dbs_check_ok: bool
-    ts_status: bool
-    ami_mission: Mission
-    brake_status: bool
-    sdc_status: bool
-    res_go_signal: bool
+    dsms_status: bool = False
+    dbs_check_ok: bool = True
+    ts_status: bool = True
+    ami_mission: Mission = Mission.INSPECTION
+    brake_status: bool = True
+    sdc_status: bool = True
+    res_go_signal: bool = False
     velocity: np.ndarray = field(default_factory=lambda: np.zeros(3, dtype=np.float64))
-
-    @property
-    def dsms_status(self) -> bool:
-        """Alias for asms_status per legacy FSAE naming conventions."""
-        return self.asms_status
 
 
 @dataclass
@@ -111,7 +106,7 @@ class StateMachineStatusMessage:
     """Outbound Level 1 state machine telemetry, diagnostics, and gate status."""
     timestamp: float
     current_state: MacroState
-    assi_status: ASSIStatus
+    dssi_status: DSSIStatus
     error_code: int
     error_flags: np.ndarray
     heartbeat: int

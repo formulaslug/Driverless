@@ -14,7 +14,7 @@ if PIPELINE_DIR not in sys.path:
 
 from messages import (
     MacroState,
-    ASSIStatus,
+    DSSIStatus,
     EbsStatus,
     Mission,
     DiagnosticErrorCode,
@@ -68,12 +68,12 @@ class Level1StateMachine:
     - AS_Driving: Autonomous mission active, 50 Hz watchdogs, Level 3 actuation multiplexed.
     - AS_Finished: Autonomous run complete, verified standstill, EBS engaged.
     - AS_Emergency: Safety shutdown circuit open or fault tripped; latching.
-    - Manual_Driving: TS active with manual mission and ASMS off.
+    - Manual_Driving: TS active with manual mission and DSMS off.
     """
 
     def __init__(self) -> None:
         self._state: MacroState = MacroState.AS_OFF
-        self._assi_status: ASSIStatus = ASSIStatus.OFF
+        self._dssi_status: DSSIStatus = DSSIStatus.OFF
         self._error_code: int = DiagnosticErrorCode.NONE
 
         # Timers and timestamps
@@ -104,9 +104,9 @@ class Level1StateMachine:
         return self._state
 
     @property
-    def assi_status(self) -> ASSIStatus:
-        """Active Autonomous System Status Indicator state."""
-        return self._assi_status
+    def dssi_status(self) -> DSSIStatus:
+        """Active Driverless System Status Indicator state."""
+        return self._dssi_status
 
     @property
     def error_code(self) -> int:
@@ -151,7 +151,7 @@ class Level1StateMachine:
         """Attempt to clear AS_Emergency latch and return to AS_Off.
         
         Per rulebook / flowchart: Requires EBS sound off (EBS unlatched/deactivated),
-        ASMS switch off, and brakes released.
+        DSMS switch off, and brakes released.
         
         Args:
             telemetry: Current VCU telemetry.
@@ -162,10 +162,10 @@ class Level1StateMachine:
         if self._state != MacroState.AS_EMERGENCY:
             return False
 
-        # Reset conditions: EBS deactivated, ASMS off, brakes released, SDC closed
+        # Reset conditions: EBS deactivated, DSMS off, brakes released, SDC closed
         reset_conditions = np.array([
             telemetry.ebs_status != EbsStatus.ACTIVATED,
-            not telemetry.asms_status,
+            not telemetry.dsms_status,
             not telemetry.brake_status,
             telemetry.sdc_status,
         ], dtype=bool)
@@ -233,7 +233,7 @@ class Level1StateMachine:
         status_msg = StateMachineStatusMessage(
             timestamp=now,
             current_state=self._state,
-            assi_status=self._assi_status,
+            dssi_status=self._dssi_status,
             error_code=self._error_code,
             error_flags=unpack_diagnostic_flags(self._error_code),
             heartbeat=self._heartbeat,
@@ -256,11 +256,11 @@ class Level1StateMachine:
         self._ebs_trigger_cmd = False
         self._service_brake_cmd = False
 
-        # Check Manual Driving transition: Manual mission & EBS unavailable & ASMS off & TS active
+        # Check Manual Driving transition: Manual mission & EBS unavailable & DSMS off & TS active
         manual_conditions = np.array([
             telemetry.ami_mission == Mission.MANUAL,
             telemetry.ebs_status == EbsStatus.UNAVAILABLE,
-            not telemetry.asms_status,
+            not telemetry.dsms_status,
             telemetry.ts_status,
         ], dtype=bool)
         if np.all(manual_conditions):
@@ -270,7 +270,7 @@ class Level1StateMachine:
         # Check AS_Off -> AS_Ready preconditions
         readiness_conditions = np.array([
             telemetry.ebs_status == EbsStatus.ARMED,
-            telemetry.asms_status,
+            telemetry.dsms_status,
             telemetry.dbs_check_ok,
             telemetry.ts_status,
             telemetry.ami_mission in VALID_DRIVERLESS_MISSIONS,
@@ -298,8 +298,8 @@ class Level1StateMachine:
             self._transition_to_emergency(DiagnosticErrorCode.EBS_ACTIVATED_UNEXPECTED, now)
             return None
 
-        # Check clean exit path to AS_Off: ASMS off & brakes released
-        if (not telemetry.asms_status) and (not telemetry.brake_status):
+        # Check clean exit path to AS_Off: DSMS off & brakes released
+        if (not telemetry.dsms_status) and (not telemetry.brake_status):
             self._transition_to_state(MacroState.AS_OFF, now)
             return None
 
@@ -324,7 +324,7 @@ class Level1StateMachine:
         if telemetry.res_go_signal:
             driving_preconditions = np.array([
                 telemetry.ebs_status == EbsStatus.ARMED,
-                telemetry.asms_status,
+                telemetry.dsms_status,
                 telemetry.ts_status,
                 telemetry.sdc_status,
                 telemetry.dbs_check_ok,
@@ -349,8 +349,8 @@ class Level1StateMachine:
         if telemetry.ebs_status == EbsStatus.ACTIVATED:
             self._transition_to_emergency(DiagnosticErrorCode.EBS_ACTIVATED_UNEXPECTED, now)
             return None
-        if not telemetry.asms_status:
-            self._transition_to_emergency(DiagnosticErrorCode.ASMS_UNEXPECTED_DROP, now)
+        if not telemetry.dsms_status:
+            self._transition_to_emergency(DiagnosticErrorCode.DSMS_UNEXPECTED_DROP, now)
             return None
         if not telemetry.ts_status:
             self._transition_to_emergency(DiagnosticErrorCode.TS_INACTIVE, now)
@@ -404,8 +404,8 @@ class Level1StateMachine:
         self._ebs_trigger_cmd = True
         self._service_brake_cmd = False
 
-        # Clean exit to AS_Off: ASMS off & brakes released
-        if (not telemetry.asms_status) and (not telemetry.brake_status):
+        # Clean exit to AS_Off: DSMS off & brakes released
+        if (not telemetry.dsms_status) and (not telemetry.brake_status):
             self._transition_to_state(MacroState.AS_OFF, now)
 
         return None
@@ -438,9 +438,9 @@ class Level1StateMachine:
         self._state = new_state
         self._state_entry_time = now
 
-        # Map ASSI status
+        # Map DSSI status
         if new_state == MacroState.AS_OFF:
-            self._assi_status = ASSIStatus.OFF
+            self._dssi_status = DSSIStatus.OFF
             self._ebs_trigger_cmd = False
             self._service_brake_cmd = False
             self._active_substate_name = "NONE"
@@ -451,7 +451,7 @@ class Level1StateMachine:
                         telemetry=VcuTelemetryMessage(
                             timestamp=now,
                             ebs_status=EbsStatus.ARMED,
-                            asms_status=False,
+                            dsms_status=False,
                             dbs_check_ok=True,
                             ts_status=False,
                             ami_mission=Mission.NOT_SELECTED,
@@ -468,14 +468,14 @@ class Level1StateMachine:
                 self._active_mission_behavior = None
 
         elif new_state == MacroState.AS_READY:
-            self._assi_status = ASSIStatus.CONTINUOUS_YELLOW
+            self._dssi_status = DSSIStatus.CONTINUOUS_YELLOW
             self._ready_start_time = now
             self._premature_res_detected = False
             self._service_brake_cmd = True
             self._ebs_trigger_cmd = False
 
         elif new_state == MacroState.AS_FINISHED:
-            self._assi_status = ASSIStatus.FLASHING_BLUE
+            self._dssi_status = DSSIStatus.FLASHING_BLUE
             self._ebs_trigger_cmd = True
             self._service_brake_cmd = False
             if self._active_mission_behavior is not None:
@@ -484,7 +484,7 @@ class Level1StateMachine:
                         telemetry=VcuTelemetryMessage(
                             timestamp=now,
                             ebs_status=EbsStatus.ACTIVATED,
-                            asms_status=True,
+                            dsms_status=True,
                             dbs_check_ok=True,
                             ts_status=True,
                             ami_mission=Mission.NOT_SELECTED,
@@ -500,14 +500,14 @@ class Level1StateMachine:
                 )
 
         elif new_state == MacroState.MANUAL_DRIVING:
-            self._assi_status = ASSIStatus.OFF
+            self._dssi_status = DSSIStatus.OFF
             self._ebs_trigger_cmd = False
             self._service_brake_cmd = False
 
     def _transition_to_driving(self, telemetry: VcuTelemetryMessage, now: float) -> None:
         """Initialize driving state and instantiate Level 2 mission."""
         self._state = MacroState.AS_DRIVING
-        self._assi_status = ASSIStatus.FLASHING_YELLOW
+        self._dssi_status = DSSIStatus.FLASHING_YELLOW
         self._state_entry_time = now
         self._mission_start_time = now
         self._service_brake_cmd = False
@@ -536,7 +536,7 @@ class Level1StateMachine:
     def _transition_to_emergency(self, fault: DiagnosticErrorCode, now: float) -> None:
         """Latch into AS_Emergency with specific fault code."""
         self._state = MacroState.AS_EMERGENCY
-        self._assi_status = ASSIStatus.CONTINUOUS_BLUE
+        self._dssi_status = DSSIStatus.CONTINUOUS_BLUE
         self._error_code |= int(fault)
         self._ebs_trigger_cmd = True
         self._service_brake_cmd = True
@@ -549,7 +549,7 @@ class Level1StateMachine:
                         telemetry=VcuTelemetryMessage(
                             timestamp=now,
                             ebs_status=EbsStatus.ACTIVATED,
-                            asms_status=False,
+                            dsms_status=False,
                             dbs_check_ok=False,
                             ts_status=False,
                             ami_mission=Mission.NOT_SELECTED,

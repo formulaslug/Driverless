@@ -8,7 +8,7 @@ from graph import Graph
 from node import Node
 from messages import (
     MacroState,
-    ASSIStatus,
+    DSSIStatus,
     VcuTelemetryMessage,
     StateMachineStatusMessage,
     ActuationCommandMessage,

@@ -3,7 +3,7 @@
 import pytest
 import numpy as np
 
-from messages import MacroState, ASSIStatus
+from messages import MacroState, DSSIStatus
 from StateMachine.level1_state_machine import Level1StateMachine
 from StateMachine.tests.conftest import make_ready_telemetry
 
@@ -59,7 +59,7 @@ def test_premature_res_go_rejection(state_machine: Level1StateMachine) -> None:
     t += 0.02
     status, _ = state_machine.step(make_ready_telemetry(timestamp=t, res_go=True))
     assert status.current_state == MacroState.AS_DRIVING
-    assert status.assi_status == ASSIStatus.FLASHING_YELLOW
+    assert status.dssi_status == DSSIStatus.FLASHING_YELLOW
 
 
 def test_held_res_go_across_boundary_is_rejected(state_machine: Level1StateMachine) -> None:

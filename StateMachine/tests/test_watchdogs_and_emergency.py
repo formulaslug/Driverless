@@ -5,7 +5,7 @@ import numpy as np
 
 from messages import (
     MacroState,
-    ASSIStatus,
+    DSSIStatus,
     EbsStatus,
     Mission,
     DiagnosticErrorCode,
@@ -29,7 +29,7 @@ def test_vcu_watchdog_timeout_trips_emergency(state_machine: Level1StateMachine)
     status, act = state_machine.step(tel)
 
     assert status.current_state == MacroState.AS_EMERGENCY
-    assert status.assi_status == ASSIStatus.CONTINUOUS_BLUE
+    assert status.dssi_status == DSSIStatus.CONTINUOUS_BLUE
     assert status.error_code & DiagnosticErrorCode.WATCHDOG_TIMEOUT_VCU
     assert status.error_flags[2]  # Bit 2 corresponds to WATCHDOG_TIMEOUT_VCU
     assert status.ebs_trigger_cmd is True
@@ -66,8 +66,8 @@ def test_unexpected_ebs_activation_trips_emergency(state_machine: Level1StateMac
     assert status.error_code & DiagnosticErrorCode.EBS_ACTIVATED_UNEXPECTED
 
 
-def test_asms_drop_in_driving_trips_emergency(state_machine: Level1StateMachine) -> None:
-    """Switching ASMS off during AS_Driving trips to AS_Emergency."""
+def test_dsms_drop_in_driving_trips_emergency(state_machine: Level1StateMachine) -> None:
+    """Switching DSMS off during AS_Driving trips to AS_Emergency."""
     t = 1.0
     state_machine.step(make_ready_telemetry(timestamp=t))
 
@@ -80,14 +80,14 @@ def test_asms_drop_in_driving_trips_emergency(state_machine: Level1StateMachine)
     state_machine.step(make_ready_telemetry(timestamp=t, res_go=True))
     assert state_machine.current_state == MacroState.AS_DRIVING
 
-    # Drop ASMS
+    # Drop DSMS
     t += 0.02
     tel = make_ready_telemetry(timestamp=t)
-    tel.asms_status = False
+    tel.dsms_status = False
     status, _ = state_machine.step(tel)
 
     assert status.current_state == MacroState.AS_EMERGENCY
-    assert status.error_code & DiagnosticErrorCode.ASMS_UNEXPECTED_DROP
+    assert status.error_code & DiagnosticErrorCode.DSMS_UNEXPECTED_DROP
 
 
 class CrashingMission(MissionBehavior):
@@ -142,31 +142,31 @@ def test_emergency_latching_and_reset_guards(state_machine: Level1StateMachine) 
     status, _ = state_machine.step(make_ready_telemetry(timestamp=1.04))
     assert status.current_state == MacroState.AS_EMERGENCY
 
-    # Attempt reset with ASMS on -> Must fail
+    # Attempt reset with DSMS on -> Must fail
     tel_bad1 = make_ready_telemetry(timestamp=1.06)
-    tel_bad1.asms_status = True
+    tel_bad1.dsms_status = True
     assert not state_machine.request_reset(tel_bad1)
     assert state_machine.current_state == MacroState.AS_EMERGENCY
 
     # Attempt reset with EBS activated -> Must fail
     tel_bad2 = make_ready_telemetry(timestamp=1.08)
-    tel_bad2.asms_status = False
+    tel_bad2.dsms_status = False
     tel_bad2.ebs_status = EbsStatus.ACTIVATED
     assert not state_machine.request_reset(tel_bad2)
     assert state_machine.current_state == MacroState.AS_EMERGENCY
 
     # Attempt reset with brakes engaged -> Must fail
     tel_bad3 = make_ready_telemetry(timestamp=1.10)
-    tel_bad3.asms_status = False
+    tel_bad3.dsms_status = False
     tel_bad3.brake_status = True
     assert not state_machine.request_reset(tel_bad3)
     assert state_machine.current_state == MacroState.AS_EMERGENCY
 
-    # Valid reset: ASMS off, brakes released, EBS disarmed, SDC closed
+    # Valid reset: DSMS off, brakes released, EBS disarmed, SDC closed
     tel_valid = VcuTelemetryMessage(
         timestamp=1.12,
         ebs_status=EbsStatus.ARMED,
-        asms_status=False,
+        dsms_status=False,
         dbs_check_ok=True,
         ts_status=False,
         ami_mission=Mission.NOT_SELECTED,

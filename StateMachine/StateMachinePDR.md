@@ -24,8 +24,8 @@ Transitions and checks between each state is well defined within the FSAE Driver
 
 ### Inputs:
 * EBS Status
-* DBMS/ASMS Status
-    * Note: DBMS (Driverless System Master Switch) is often now called ASMS (Autonomous System Master Switch). We will be using ASMS for the remainder of this PDR. See Appendix.
+* DSMS Status
+    * Note: DSMS (Driverless System Master Switch) allows voltage supply to the steering and braking actuators. See Appendix.
 * DBS Check Status
 * TS Status
 * Mission to be selected
@@ -97,7 +97,7 @@ Some  examples may include:
 ## Roadmap
 
 ### Phase 1: Architecture & Mock Simulation (1-2 Weeks)
-* Deliverables: Finalize pub/sub message definitions; implement the Level 1 State Machine in Python; build a CLI/GUI Mock VCU Publisher that lets developers toggle `ASMS`, `EBS`, `SDC`, and `RES Go`/`R2D` in software.
+* Deliverables: Finalize pub/sub message definitions; implement the Level 1 State Machine in Python; build a CLI/GUI Mock VCU Publisher that lets developers toggle `DSMS`, `EBS`, `SDC`, and `RES Go`/`R2D` in software.
 * Milestone (M1): Pass unit tests covering every arrow in the Level 1 diagram (including the 5-second `AS_Ready` timer and fault injections).
 
 ### Phase 2: Level 2 Plugin API & "Test Subsystems" MVP State (Weeks 3–4)
@@ -106,7 +106,7 @@ Some  examples may include:
 
 ### Phase 3: Hardware-in-the-Loop (HIL) & Bench Integration (Weeks 5–6) (Winter Quarter)
 
-* Deliverables: Connect compute unit to the VCU over the actual pub/sub bridge on the bench; verify ASSI LED indicator states, and watchdog trip latency ($< 200\text{ ms}$).
+* Deliverables: Connect compute unit to the VCU over the actual pub/sub bridge on the bench; verify DSSI LED indicator states, and watchdog trip latency ($< 200\text{ ms}$).
 * Milestone (M3): Car on jackstands successfully executes the Inspection Mission triggered by the physical RES button and transitions cleanly to `AS_Finished`.
 
 ### Phase 4: Dynamic Event Integration (Weeks 7–8)
@@ -122,13 +122,13 @@ sensor
 * SA: Steering Actuator
 * SB: Service Brake
 * EBS: Emergency Brake System
-* ASSI: Autonomous System Status Indicator, it is a LED lamp indicating the actual
-state of the vehicle. There are three ASSIs on the vehicle; two must be located on
+* DSSI: Driverless System Status Indicator, it is a LED lamp indicating the actual
+state of the vehicle. There are three DSSIs on the vehicle; two must be located on
 each side of the vehicle behind the driver’s compartment in a specific region below
 the main hoop, while the other one must be positioned in the rear, on the vehicle
 centreline. To favour the visibility of the light also in sunlight, they have a dark
 background
-* **ASMS**: Autonomous System Master Switch, a switch that allows the voltage
+* **DSMS**: Driverless System Master Switch, a switch that allows the voltage
 supply to the steering and braking actuators
 * VSU: Vehicle Control Unit
 

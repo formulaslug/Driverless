@@ -26,7 +26,7 @@ def test_inspection_mission_lifecycle_and_substates() -> None:
             telemetry=VcuTelemetryMessage(
                 timestamp=time_now,
                 ebs_status=EbsStatus.ARMED,
-                asms_status=True,
+                dsms_status=True,
                 dbs_check_ok=True,
                 ts_status=True,
                 ami_mission=Mission.INSPECTION,

@@ -19,7 +19,7 @@ from messages import (
     EbsStatus,
     Mission,
     MacroState,
-    ASSIStatus,
+    DSSIStatus,
     VcuTelemetryMessage,
     StateMachineStatusMessage,
     ActuationCommandMessage,
@@ -35,7 +35,7 @@ class MockVcuSimulator:
     def __init__(self, initial_time: float = 0.0) -> None:
         self.time: float = initial_time
         self.ebs_status: EbsStatus = EbsStatus.ARMED
-        self.asms_status: bool = False
+        self.dsms_status: bool = False
         self.dbs_check_ok: bool = True
         self.ts_status: bool = True
         self.ami_mission: Mission = Mission.INSPECTION
@@ -47,7 +47,7 @@ class MockVcuSimulator:
     def set_readiness_preconditions(self) -> None:
         """Set all physical preconditions required for AS_Off -> AS_Ready."""
         self.ebs_status = EbsStatus.ARMED
-        self.asms_status = True
+        self.dsms_status = True
         self.dbs_check_ok = True
         self.ts_status = True
         self.ami_mission = Mission.INSPECTION
@@ -62,7 +62,7 @@ class MockVcuSimulator:
         return VcuTelemetryMessage(
             timestamp=self.time,
             ebs_status=self.ebs_status,
-            asms_status=self.asms_status,
+            dsms_status=self.dsms_status,
             dbs_check_ok=self.dbs_check_ok,
             ts_status=self.ts_status,
             ami_mission=self.ami_mission,
@@ -119,7 +119,7 @@ def run_normal_mission_scenario(verbose: bool = True) -> bool:
     vcu.set_readiness_preconditions()
     status, _ = sm.step(vcu.step())
     assert status.current_state == MacroState.AS_READY
-    assert status.assi_status == ASSIStatus.CONTINUOUS_YELLOW
+    assert status.dssi_status == DSSIStatus.CONTINUOUS_YELLOW
 
     if verbose:
         print("[Scenario] 3. Enforcing 5.0s lockout timer (stepping 5.1s)...")
@@ -134,7 +134,7 @@ def run_normal_mission_scenario(verbose: bool = True) -> bool:
     status, _ = sm.step(vcu.step())
     vcu.res_go_signal = False
     assert status.current_state == MacroState.AS_DRIVING
-    assert status.assi_status == ASSIStatus.FLASHING_YELLOW
+    assert status.dssi_status == DSSIStatus.FLASHING_YELLOW
 
     if verbose:
         print("[Scenario] 5. Driving Inspection mission until completion...")
@@ -144,12 +144,12 @@ def run_normal_mission_scenario(verbose: bool = True) -> bool:
             break
 
     assert status.current_state == MacroState.AS_FINISHED
-    assert status.assi_status == ASSIStatus.FLASHING_BLUE
+    assert status.dssi_status == DSSIStatus.FLASHING_BLUE
     assert status.ebs_trigger_cmd is True
 
     if verbose:
-        print("[Scenario] 6. Powering down: ASMS Off & Brakes Released -> Expect AS_Off")
-    vcu.asms_status = False
+        print("[Scenario] 6. Powering down: DSMS Off & Brakes Released -> Expect AS_Off")
+    vcu.dsms_status = False
     vcu.brake_status = False
     status, _ = sm.step(vcu.step())
     assert status.current_state == MacroState.AS_OFF
@@ -218,12 +218,12 @@ def run_sdc_trip_scenario(verbose: bool = True) -> bool:
     vcu.sdc_status = False
     status, act = sm.step(vcu.step())
     assert status.current_state == MacroState.AS_EMERGENCY
-    assert status.assi_status == ASSIStatus.CONTINUOUS_BLUE
+    assert status.dssi_status == DSSIStatus.CONTINUOUS_BLUE
     assert act.gated is False
     assert status.ebs_trigger_cmd is True
 
     if verbose:
-        print("[Scenario] Verifying emergency latching (cannot reset while ASMS is on)...")
+        print("[Scenario] Verifying emergency latching (cannot reset while DSMS is on)...")
     reset_ok = sm.request_reset(vcu.step())
     assert not reset_ok
     assert sm.current_state == MacroState.AS_EMERGENCY
@@ -231,7 +231,7 @@ def run_sdc_trip_scenario(verbose: bool = True) -> bool:
     if verbose:
         print("[Scenario] Clearing faults and resetting...")
     vcu.sdc_status = True
-    vcu.asms_status = False
+    vcu.dsms_status = False
     vcu.brake_status = False
     vcu.ebs_status = EbsStatus.ARMED
     reset_ok = sm.request_reset(vcu.step())
