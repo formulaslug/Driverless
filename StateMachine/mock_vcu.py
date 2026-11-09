@@ -302,6 +302,170 @@ def run_watchdog_trip_scenario(verbose: bool = True) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Interactive Terminal Mode
+# ---------------------------------------------------------------------------
+
+def run_interactive_mode(input_fn=input, output_fn=print) -> None:
+    """Run interactive terminal prompt allowing live toggling of VCU signals and stepping the state machine."""
+    sm = Level1StateMachine()
+    vcu = MockVcuSimulator(initial_time=0.0)
+
+    output_fn("================ Interactive Mock VCU Terminal ================")
+    output_fn("Commands:")
+    output_fn("  ready              - Apply all AS_Ready preconditions")
+    output_fn("  dsms [on|off]      - Toggle or set DSMS switch")
+    output_fn("  ebs [armed|act]    - Set EBS to ARMED or ACTIVATED")
+    output_fn("  sdc [trip|close]   - Trip (open) or close Shutdown Circuit")
+    output_fn("  go [press|rel]     - Press or release RES Go button")
+    output_fn("  brakes [on|off]    - Engage or release service brakes")
+    output_fn("  speed <vx>         - Set vehicle longitudinal velocity (m/s)")
+    output_fn("  mission <name>     - Set mission (inspection, accel, skidpad, etc.)")
+    output_fn("  step [n]           - Step state machine n cycles (default 1)")
+    output_fn("  reset              - Attempt emergency reset")
+    output_fn("  status             - Print current telemetry and state")
+    output_fn("  help               - Show this help menu")
+    output_fn("  quit / exit        - Exit interactive shell")
+    output_fn("===============================================================\n")
+
+    def print_status(status: StateMachineStatusMessage, act: ActuationCommandMessage) -> None:
+        err_str = f"0x{status.error_code:04X}" if status.error_code else "NONE"
+        output_fn(
+            f"[t={status.timestamp:.2f}s] State: {status.current_state.name} | "
+            f"DSSI: {status.dssi_status.name} | Error: {err_str} | "
+            f"Substate: {status.active_substate} | "
+            f"Act: (str={act.steering[0]:.2f}, thr={act.throttle[0]:.2f}, brk={act.braking[0]:.2f}, gated={act.gated})"
+        )
+
+    # Initial step
+    status, act = sm.step(vcu.step())
+    print_status(status, act)
+
+    while True:
+        try:
+            line = input_fn("mock-vcu> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            output_fn("\nExiting interactive shell.")
+            break
+
+        if not line:
+            continue
+
+        parts = line.split()
+        cmd = parts[0].lower()
+        cmd_args = parts[1:]
+
+        if cmd in ("quit", "exit", "q"):
+            output_fn("Exiting interactive shell.")
+            break
+
+        elif cmd == "help":
+            output_fn("Commands: ready, dsms [on|off], ebs [armed|act], sdc [trip|close], go [press|rel], brakes [on|off], speed <vx>, mission <name>, step [n], reset, status, quit")
+
+        elif cmd == "ready":
+            vcu.set_readiness_preconditions()
+            output_fn("Applied AS_Ready preconditions.")
+            status, act = sm.step(vcu.step())
+            print_status(status, act)
+
+        elif cmd == "dsms":
+            if cmd_args:
+                val = cmd_args[0].lower() in ("1", "on", "true")
+                vcu.toggle_dsms(val)
+            else:
+                vcu.toggle_dsms()
+            output_fn(f"DSMS status: {vcu.dsms_status}")
+            status, act = sm.step(vcu.step())
+            print_status(status, act)
+
+        elif cmd == "ebs":
+            if cmd_args and cmd_args[0].lower() in ("act", "activated", "2"):
+                vcu.toggle_ebs(EbsStatus.ACTIVATED)
+            else:
+                vcu.toggle_ebs(EbsStatus.ARMED)
+            output_fn(f"EBS status: {vcu.ebs_status.name}")
+            status, act = sm.step(vcu.step())
+            print_status(status, act)
+
+        elif cmd == "sdc":
+            if cmd_args and cmd_args[0].lower() in ("close", "closed", "1", "true"):
+                vcu.close_sdc()
+            else:
+                vcu.trip_sdc()
+            output_fn(f"SDC status: {vcu.sdc_status}")
+            status, act = sm.step(vcu.step())
+            print_status(status, act)
+
+        elif cmd == "go":
+            if cmd_args and cmd_args[0].lower() in ("rel", "release", "0", "false"):
+                vcu.release_res_go()
+            else:
+                vcu.press_res_go()
+            output_fn(f"RES Go pressed: {vcu.res_go_signal}")
+            status, act = sm.step(vcu.step())
+            print_status(status, act)
+
+        elif cmd == "brakes":
+            if cmd_args and cmd_args[0].lower() in ("rel", "release", "off", "0", "false"):
+                vcu.brake_status = False
+            else:
+                vcu.brake_status = True
+            output_fn(f"Brake status: {vcu.brake_status}")
+            status, act = sm.step(vcu.step())
+            print_status(status, act)
+
+        elif cmd == "speed":
+            if cmd_args:
+                try:
+                    spd = float(cmd_args[0])
+                    vcu.set_speed(spd)
+                    output_fn(f"Longitudinal speed set to: {spd:.2f} m/s")
+                except ValueError:
+                    output_fn(f"Invalid speed: {cmd_args[0]}")
+            else:
+                output_fn(f"Current speed: {vcu.velocity[0]:.2f} m/s")
+            status, act = sm.step(vcu.step())
+            print_status(status, act)
+
+        elif cmd == "mission":
+            if cmd_args:
+                m_str = cmd_args[0].upper()
+                try:
+                    vcu.ami_mission = Mission[m_str]
+                    output_fn(f"Selected mission: {vcu.ami_mission.name}")
+                except KeyError:
+                    output_fn(f"Unknown mission '{cmd_args[0]}'. Choices: {[m.name for m in Mission]}")
+            else:
+                output_fn(f"Current mission: {vcu.ami_mission.name}")
+            status, act = sm.step(vcu.step())
+            print_status(status, act)
+
+        elif cmd == "reset":
+            ok = sm.request_reset(vcu.step())
+            output_fn(f"Emergency reset result: {ok} (current state: {sm.current_state.name})")
+            status, act = sm.step(vcu.step())
+            print_status(status, act)
+
+        elif cmd == "step":
+            n = 1
+            if cmd_args:
+                try:
+                    n = max(1, int(cmd_args[0]))
+                except ValueError:
+                    n = 1
+            for _ in range(n):
+                status, act = sm.step(vcu.step())
+            output_fn(f"Stepped {n} cycles.")
+            print_status(status, act)
+
+        elif cmd == "status":
+            status, act = sm.step(vcu.step())
+            print_status(status, act)
+
+        else:
+            output_fn(f"Unrecognized command: '{cmd}'. Type 'help' for available commands.")
+
+
+# ---------------------------------------------------------------------------
 # CLI Entrypoint
 # ---------------------------------------------------------------------------
 
@@ -313,7 +477,16 @@ def main() -> None:
         default="all",
         help="Automated scenario to execute",
     )
+    parser.add_argument(
+        "--interactive", "-i",
+        action="store_true",
+        help="Launch interactive terminal prompt to toggle VCU signals live",
+    )
     args = parser.parse_args()
+
+    if args.interactive:
+        run_interactive_mode()
+        return
 
     print("=== FSAE Driverless Mock VCU Harness ===")
     if args.scenario in ("normal", "all"):

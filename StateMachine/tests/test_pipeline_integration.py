@@ -176,3 +176,36 @@ def test_statemachine_node_request_reset() -> None:
     ok = node.request_reset(valid_reset_tel)
     assert ok is True
     assert node.state_machine.current_state == MacroState.AS_OFF
+
+
+def test_mock_vcu_interactive_mode() -> None:
+    """Verifies that run_interactive_mode responds to commands and controls state machine."""
+    from StateMachine.mock_vcu import run_interactive_mode
+
+    commands = [
+        "help",
+        "ready",
+        "step 10",
+        "speed 5.0",
+        "dsms off",
+        "dsms on",
+        "ebs act",
+        "status",
+        "quit",
+    ]
+    outputs = []
+
+    def mock_input(prompt: str = "") -> str:
+        if commands:
+            return commands.pop(0)
+        return "quit"
+
+    def mock_output(msg: str) -> None:
+        outputs.append(msg)
+
+    run_interactive_mode(input_fn=mock_input, output_fn=mock_output)
+
+    assert any("Applied AS_Ready preconditions" in out for out in outputs)
+    assert any("Stepped 10 cycles" in out for out in outputs)
+    assert any("Longitudinal speed set to: 5.00 m/s" in out for out in outputs)
+    assert any("Exiting interactive shell" in out for out in outputs)
