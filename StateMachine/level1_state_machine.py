@@ -319,18 +319,19 @@ class Level1StateMachine:
         # 2. Evaluate State-Specific Logic
         raw_cmd = external_actuation
 
-        if self._state == MacroState.AS_OFF:
-            raw_cmd = self._step_as_off(telemetry, now)
-        elif self._state == MacroState.AS_READY:
-            raw_cmd = self._step_as_ready(telemetry, now)
-        elif self._state == MacroState.AS_DRIVING:
-            raw_cmd = self._step_as_driving(telemetry, dt, now, external_actuation)
-        elif self._state == MacroState.AS_FINISHED:
-            raw_cmd = self._step_as_finished(telemetry, now)
-        elif self._state == MacroState.AS_EMERGENCY:
-            raw_cmd = self._step_as_emergency(telemetry, now)
-        elif self._state == MacroState.MANUAL_DRIVING:
-            raw_cmd = self._step_manual_driving(telemetry, now)
+        match self._state:
+            case MacroState.AS_OFF:
+                raw_cmd = self._step_as_off(telemetry, now)
+            case MacroState.AS_READY:
+                raw_cmd = self._step_as_ready(telemetry, now)
+            case MacroState.AS_DRIVING:
+                raw_cmd = self._step_as_driving(telemetry, dt, now, external_actuation)
+            case MacroState.AS_FINISHED:
+                raw_cmd = self._step_as_finished(telemetry, now)
+            case MacroState.AS_EMERGENCY:
+                raw_cmd = self._step_as_emergency(telemetry, now)
+            case MacroState.MANUAL_DRIVING:
+                raw_cmd = self._step_manual_driving(telemetry, now)
 
         # 3. Gated Actuation Filter
         gated_cmd = ActuationGatekeeper.gate_command(
