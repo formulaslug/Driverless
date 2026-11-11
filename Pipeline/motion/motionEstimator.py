@@ -7,7 +7,7 @@ class MotionEstimator:
 
 def createMotionEstimator(name, **kwargs):
     if name == 'imu':
-        from imuMotionEstimator import ImuMotionEstimator
+        from Pipeline.motion.imuMotionEstimator import ImuMotionEstimator
         return ImuMotionEstimator(**kwargs)
     if name == 'none':
         return _ZeroMotion()

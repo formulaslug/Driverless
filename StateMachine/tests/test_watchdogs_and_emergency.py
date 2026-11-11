@@ -3,7 +3,7 @@
 import pytest
 import numpy as np
 
-from messages import (
+from Pipeline.messages import (
     MacroState,
     DSSIStatus,
     EbsStatus,

@@ -4,9 +4,9 @@ import time
 import pytest
 import numpy as np
 
-from graph import Graph
-from node import Node
-from messages import (
+from Pipeline.graph import Graph
+from Pipeline.node import Node
+from Pipeline.messages import (
     MacroState,
     DSSIStatus,
     EbsStatus,
@@ -156,7 +156,7 @@ def test_statemachine_node_concurrent_access() -> None:
 
 def test_statemachine_node_request_reset() -> None:
     """Verifies StateMachineNode delegates emergency reset thread-safely."""
-    from messages import DiagnosticErrorCode
+    from Pipeline.messages import DiagnosticErrorCode
 
     node = StateMachineNode()
     tel = VcuTelemetryMessage(timestamp=1.0, ebs_status=EbsStatus.ARMED, dsms_status=True)

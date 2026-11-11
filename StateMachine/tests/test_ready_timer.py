@@ -3,7 +3,7 @@
 import pytest
 import numpy as np
 
-from messages import MacroState, DSSIStatus
+from Pipeline.messages import MacroState, DSSIStatus
 from StateMachine.level1_state_machine import Level1StateMachine
 from StateMachine.tests.conftest import make_ready_telemetry
 

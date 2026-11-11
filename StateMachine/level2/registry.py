@@ -1,16 +1,8 @@
 """Registry for pluggable Level 2 autonomous missions."""
 
 from typing import Dict, Type, Optional
-import sys
-import os
-ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-if ROOT_DIR not in sys.path:
-    sys.path.insert(0, ROOT_DIR)
-PIPELINE_DIR = os.path.join(ROOT_DIR, 'Pipeline')
-if PIPELINE_DIR not in sys.path:
-    sys.path.insert(0, PIPELINE_DIR)
 
-from messages import Mission
+from Pipeline.messages import Mission
 from StateMachine.level2.base import MissionBehavior
 
 

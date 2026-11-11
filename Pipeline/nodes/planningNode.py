@@ -1,12 +1,8 @@
-import os
-import sys
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import pipelinePaths  # noqa: F401
+import Pipeline.pipelinePaths  # noqa: F401
 
 import numpy as np
-from node import Node
-from messages import ConeMapMessage, PathMessage
+from Pipeline.node import Node
+from Pipeline.messages import ConeMapMessage, PathMessage
 from coneLocalizer import coneFilterToPathPlannerInput
 from path_planner import plan_path
 

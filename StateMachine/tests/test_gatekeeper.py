@@ -3,7 +3,7 @@
 import pytest
 import numpy as np
 
-from messages import MacroState, ActuationCommandMessage
+from Pipeline.messages import MacroState, ActuationCommandMessage
 from StateMachine.gatekeeper import ActuationGatekeeper
 
 

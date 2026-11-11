@@ -1,14 +1,12 @@
-import os
 import sys
 import traceback
 from collections import deque
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import pipelinePaths  # noqa: F401
+import Pipeline.pipelinePaths  # noqa: F401
 
-from node import Node
-from messages import SegmentationMessage, ConeDistancesMessage, OdometryMessage, ConeMapMessage, FailedFrameMessage
-from synchronizer import FrameSynchronizer, ReorderBuffer
+from Pipeline.node import Node
+from Pipeline.messages import SegmentationMessage, ConeDistancesMessage, OdometryMessage, ConeMapMessage, FailedFrameMessage
+from Pipeline.synchronizer import FrameSynchronizer, ReorderBuffer
 from coneLocalizer import perceptionToDetections
 from filter import ConeFilter
 

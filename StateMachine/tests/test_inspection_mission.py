@@ -3,7 +3,7 @@
 import pytest
 import numpy as np
 
-from messages import Mission, VcuTelemetryMessage, EbsStatus
+from Pipeline.messages import Mission, VcuTelemetryMessage, EbsStatus
 from StateMachine.level2.base import MissionContext
 from StateMachine.level2.registry import MissionRegistry
 from StateMachine.level2.missions.inspection import InspectionMission, InspectionSubState

@@ -1,8 +1,6 @@
 import os
-import sys
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import pipelinePaths  # noqa: F401
+import Pipeline.pipelinePaths
 
 import numpy as np
 import torch
@@ -23,7 +21,7 @@ class YoloBackend:
         self.deviceStr = _resolveDeviceStr(device)
         if weightsPath is None:
             weightsDir = os.path.join(
-                pipelinePaths.repoRoot, 'Segmentation-YOLO', 'runs', 'segment',
+                Pipeline.pipelinePaths.repoRoot, 'Segmentation-YOLO', 'runs', 'segment',
                 'cone-segmentation', 'weights'
             )
             enginePath = os.path.join(weightsDir, 'best.engine')

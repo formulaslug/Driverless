@@ -1,11 +1,7 @@
-import os
-import sys
+import Pipeline.pipelinePaths  # noqa: F401
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import pipelinePaths  # noqa: F401
-
-from node import Node
-from messages import SegmentationMessage, ConeDistancesMessage
+from Pipeline.node import Node
+from Pipeline.messages import SegmentationMessage, ConeDistancesMessage
 from distanceEstimator import DistanceEstimator
 
 # Fuses the bbox-height and flat-ground pinhole estimates into a vehicle-frame
