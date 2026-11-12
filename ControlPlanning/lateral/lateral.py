@@ -1,5 +1,4 @@
 
-
 from lateral.pure_pursuit import PurePursuit
 from lateral.stanley import Stanley
 
@@ -9,4 +8,4 @@ class Lateral():
         self.stanley = Stanley(k=1.0, wheelbase=wheelbase)
 
     def update(self, waypoints, x, y, yaw, v):
-        return self.pure_pursuit.get_curvature(waypoints, x, y, yaw, v)
+        return self.pure_pursuit.update_curvature(waypoints, x, y, yaw, v)
