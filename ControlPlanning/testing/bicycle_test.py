@@ -3,10 +3,15 @@ import matplotlib.pyplot as plt
 import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from lateral import Lateral
-from longitudinal import Longitudinal
+from lateral.lateral import Lateral
+from longitudinal.pid import PID
 
-from config import K_D_LONGITUDINAL as K_D, K_I_LONGITUDINAL as K_I, K_P_LONGITUDINAL as K_P, K_DD, WHEELBASE, MIN_LOOKAHEAD
+from config import K_DD, WHEELBASE, MIN_LOOKAHEAD
+
+# Initial PID Gains
+K_P = 0.5
+K_I = 0.1
+K_D = 0.01
 
 # actuator model
 A_MAX = 3.0        # max acceleration at throttle_output = 1
@@ -77,7 +82,7 @@ def step_bicycle_model(x, y, yaw, v, delta, a, dt, wheelbase):
 
 def run_sim(waypoints):
     lateral = Lateral(K_dd=K_DD, min_lookahead=MIN_LOOKAHEAD, wheelbase=WHEELBASE)
-    longitudinal = Longitudinal(K_p=K_P, K_i=K_I, K_d=K_D)
+    longitudinal = PID(K_p=K_P, K_i=K_I, K_d=K_D)
 
     x, y, yaw, v = X0, Y0, YAW0, V0
     t = 0.0
@@ -88,7 +93,7 @@ def run_sim(waypoints):
 
     while t < MAX_TIME:
         delta = lateral.update(waypoints, x, y, yaw, v)
-        a_des = longitudinal.update(v, V_DESIRED, t)
+        a_des = longitudinal.update_des_accel(v, V_DESIRED, t)
 
         throttle, brake = accel_to_throttle_brake(a_des)
         a = throttle_brake_to_accel(throttle, brake)
@@ -152,9 +157,9 @@ def plot_results(result):
 
 
 if __name__ == "__main__":
-    waypoints = make_tight_curve()
+    # waypoints = make_tight_curve()
     # waypoints = make_straight_curve()
-    # waypoints = make_s_curve()
+    waypoints = make_s_curve()
 
     result = run_sim(waypoints)
     plot_results(result)
