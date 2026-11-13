@@ -13,7 +13,7 @@ OUTPUTS:
 """
 
 class Controller:
-    def __init__(self, K_p, K_i, K_d, K_dd = K_DD, min_lookahead = MIN_LOOKAHEAD, wheelbase = WHEELBASE): 
+    def __init__(self, K_p = 0.5, K_i = 0.1, K_d = 0.01, K_dd = K_DD, min_lookahead = MIN_LOOKAHEAD, wheelbase = WHEELBASE): 
         self.longitudinal = Longitudinal(K_p = K_p, K_i = K_i, K_d = K_d)
         self.lateral = Lateral(K_dd = K_dd, min_lookahead = min_lookahead, wheelbase = wheelbase)
         self.steering_control = SteeringControl()

@@ -33,6 +33,9 @@ class PID:
         self.settle_time : float = None
         self.in_bound : bool = False
 
+        self.overshoot : float = 0.0
+        self.v_max : float = 0.0
+
         # Error Band Vars
         self.v_lower_bound : float = None
         self.v_upper_bound : float = None
@@ -180,15 +183,15 @@ class PID:
         self.v_lower_bound = v_desired * 0.99
         self.find_settle_time(v=v, t=t)
 
+
+        # Find overshoot
+        if v > self.v_max:
+            self.v_max = v
+        if v_desired > 0:
+            self.overshoot = max(0.0, (self.v_max - v_desired) / v_desired * 100.0)
         # Update state variables
         self.t_prev = t
         self.v_prev = v
         self.error_prev = error
         self.a_des_prev = a_des
         return a_des 
-<<<<<<< HEAD
-=======
-
-
-    
->>>>>>> cd23364caf9b90745f14b162bfbe1de1f763ba7c
