@@ -1,7 +1,6 @@
 """Autonomous Inspection Mission implementation with NumPy test profiles."""
 
 from enum import Enum
-from typing import Optional
 import numpy as np
 
 from Pipeline.messages import Mission, ActuationCommandMessage
@@ -87,53 +86,23 @@ class InspectionMission(MissionBehavior):
                 self._substate_start_time = context.mission_time
                 t_sub = 0.0
 
-        steering = np.zeros(1, dtype=np.float64)
-        throttle = np.zeros(1, dtype=np.float64)
-        braking = np.zeros(1, dtype=np.float64)
-        mission_finished = False
-
+        steering, throttle, braking = 0.0, 0.0, 0.0
         if self._substate == InspectionSubState.STEERING_SWEEP:
-            # Generate sinusoidal sweep: A * sin(2 * pi * f * t)
-            steering[0] = self.STEER_AMPLITUDE_RAD * np.sin(
-                2.0 * np.pi * self.STEER_FREQUENCY_HZ * t_sub
-            )
-            throttle[0] = 0.0
-            braking[0] = 0.0
-
+            steering = self.STEER_AMPLITUDE_RAD * np.sin(2.0 * np.pi * self.STEER_FREQUENCY_HZ * t_sub)
         elif self._substate == InspectionSubState.POWERTRAIN_RAMP:
-            # Trapezoidal throttle ramp
-            steering[0] = 0.0
-            braking[0] = 0.0
-
-            if t_sub < self.THROTTLE_RAMP_UP_S:
-                throttle[0] = self.THROTTLE_PEAK_NORM * (t_sub / self.THROTTLE_RAMP_UP_S)
-            elif t_sub < (self.POWERTRAIN_DURATION_S - self.THROTTLE_RAMP_DOWN_S):
-                throttle[0] = self.THROTTLE_PEAK_NORM
-            else:
-                remaining = self.POWERTRAIN_DURATION_S - t_sub
-                throttle[0] = np.maximum(
-                    0.0,
-                    self.THROTTLE_PEAK_NORM * (remaining / self.THROTTLE_RAMP_DOWN_S),
-                )
-
+            throttle = self._throttle_profile(t_sub)
         elif self._substate == InspectionSubState.CONTROLLED_STOP:
-            # Controlled stop to standstill
-            steering[0] = 0.0
-            throttle[0] = 0.0
-            braking[0] = self.BRAKE_STOP_NORM
-
+            braking = self.BRAKE_STOP_NORM
         elif self._substate == InspectionSubState.COMPLETE:
-            steering[0] = 0.0
-            throttle[0] = 0.0
-            braking[0] = 1.0
-            mission_finished = True
+            braking = 1.0
+        mission_finished = self._substate == InspectionSubState.COMPLETE
 
+        # ActuationCommandMessage turns these floats into shape (1,) float64 arrays.
         cmd = ActuationCommandMessage(
             timestamp=context.telemetry.timestamp,
             steering=steering,
             throttle=throttle,
             braking=braking,
-            gated=True,
         )
 
         return SubStateResult(
@@ -142,6 +111,12 @@ class InspectionMission(MissionBehavior):
             emergency_stop=False,
             actuation_command=cmd,
         )
+
+    def _throttle_profile(self, t_sub: float) -> float:
+        """Trapezoidal ramp: up over THROTTLE_RAMP_UP_S, hold, down over THROTTLE_RAMP_DOWN_S."""
+        ramp_up = t_sub / self.THROTTLE_RAMP_UP_S
+        ramp_down = (self.POWERTRAIN_DURATION_S - t_sub) / self.THROTTLE_RAMP_DOWN_S
+        return self.THROTTLE_PEAK_NORM * float(np.clip(min(ramp_up, ramp_down), 0.0, 1.0))
 
     def on_exit(self, context: MissionContext, interrupted: bool = False) -> None:
         """Cleanup upon exiting inspection driving."""

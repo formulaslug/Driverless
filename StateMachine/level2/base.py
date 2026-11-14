@@ -1,9 +1,8 @@
 """Abstract base classes and data transfer contracts for Level 2 behavioral sub-states."""
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import Optional, Dict, Any
-import numpy as np
+from dataclasses import dataclass
+from typing import Optional
 
 from Pipeline.messages import VcuTelemetryMessage, ActuationCommandMessage
 
@@ -15,7 +14,6 @@ class MissionContext:
     dt: float
     mission_time: float
     current_substate: str
-    custom_data: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -25,46 +23,15 @@ class SubStateResult:
     mission_finished: bool = False
     emergency_stop: bool = False
     actuation_command: Optional[ActuationCommandMessage] = None
-    diagnostic_code: int = 0
-
-
-class BehavioralSubState(ABC):
-    """Abstract base class for modular Level 2 driving behaviors."""
-
-    @abstractmethod
-    def on_enter(self, context: MissionContext) -> None:
-        """Called once upon entering this sub-state.
-        
-        Args:
-            context: Current mission execution context.
-        """
-        pass
-
-    @abstractmethod
-    def update(self, context: MissionContext) -> SubStateResult:
-        """Executed periodically (e.g. 50 Hz) while this sub-state is active.
-        
-        Args:
-            context: Current mission execution context.
-            
-        Returns:
-            SubStateResult specifying commands, next sub-state, or completion flags.
-        """
-        pass
-
-    @abstractmethod
-    def on_exit(self, context: MissionContext, interrupted: bool = False) -> None:
-        """Cleanup hook called prior to transitioning out of this sub-state.
-        
-        Args:
-            context: Current mission execution context.
-            interrupted: True if exited abnormally (e.g. emergency stop or fault).
-        """
-        pass
 
 
 class MissionBehavior(ABC):
-    """Abstract interface for a full autonomous mission composed of sub-states."""
+    """Level 2 plug-in interface (the PDR's BehavioralSubState concept).
+
+    Level 1 calls on_enter once on RES Go, update every AS_Driving tick, and
+    on_exit when AS_Driving ends (interrupted=True for AS_Emergency). Sub-states
+    are the mission's own business; report the current one via next_substate.
+    """
 
     @property
     @abstractmethod

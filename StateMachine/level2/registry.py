@@ -7,7 +7,7 @@ from StateMachine.level2.base import MissionBehavior
 
 
 class MissionRegistry:
-    """Thread-safe catalog of mission implementations indexed by Mission enum."""
+    """Catalog of mission implementations by Mission enum. Register at import time; not locked."""
 
     _registry: Dict[Mission, Type[MissionBehavior]] = {}
 

@@ -1,7 +1,6 @@
 """Unit tests verifying the 5-second AS_Ready lockout timer and premature RES Go rejection."""
 
 import pytest
-import numpy as np
 
 from Pipeline.messages import MacroState, DSSIStatus
 from StateMachine.level1_state_machine import Level1StateMachine

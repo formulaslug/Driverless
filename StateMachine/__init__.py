@@ -18,8 +18,7 @@ from StateMachine.level1_state_machine import (  # noqa: E402
     unpack_diagnostic_flags,
     VALID_DRIVERLESS_MISSIONS,
 )
-from StateMachine.level2 import (
-    BehavioralSubState,
+from StateMachine.level2 import (  # noqa: E402
     MissionBehavior,
     MissionContext,
     SubStateResult,
@@ -45,7 +44,6 @@ __all__ = [
     "Level1StateMachine",
     "unpack_diagnostic_flags",
     "VALID_DRIVERLESS_MISSIONS",
-    "BehavioralSubState",
     "MissionBehavior",
     "MissionContext",
     "SubStateResult",
