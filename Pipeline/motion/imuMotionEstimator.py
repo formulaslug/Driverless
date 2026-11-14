@@ -1,5 +1,5 @@
 import threading
-from motionEstimator import MotionEstimator
+from Pipeline.motion.motionEstimator import MotionEstimator
 
 # IMU-backed estimator. The car will eventually publish IMU samples; feed them
 # via addSample (safe from any thread) and this integrates them into inter-frame
