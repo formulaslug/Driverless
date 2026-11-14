@@ -45,20 +45,17 @@ class Mission(IntEnum):
 
 
 class DiagnosticErrorCode(IntFlag):
-    """Structured diagnostic fault bitmask flags for AS_Emergency."""
+    """Fault bitmask reported while in AS_Emergency. Every flag is raised somewhere in Level 1."""
     NONE = 0
     SDC_OPEN = 1 << 0
     EBS_ACTIVATED_UNEXPECTED = 1 << 1
     WATCHDOG_TIMEOUT_VCU = 1 << 2
     WATCHDOG_TIMEOUT_LEVEL2 = 1 << 3
     LEVEL2_EXCEPTION = 1 << 4
-    DBS_CHECK_FAILED = 1 << 5
-    BRAKE_CHECK_FAILED = 1 << 6
-    TS_INACTIVE = 1 << 7
-    DSMS_UNEXPECTED_DROP = 1 << 8
-    STANDSTILL_TIMEOUT = 1 << 9
-    ACTUATION_LIMIT_EXCEEDED = 1 << 10
-    PRECONDITION_TIMEOUT = 1 << 11
+    LEVEL2_EMERGENCY_STOP = 1 << 5
+    TS_INACTIVE = 1 << 6
+    DSMS_UNEXPECTED_DROP = 1 << 7
+    STANDSTILL_TIMEOUT = 1 << 8
 
 
 # ---------------------------------------------------------------------------

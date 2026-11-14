@@ -11,6 +11,7 @@ AS_READY_LOCKOUT_DURATION_S: float = 5.0
 STANDSTILL_VELOCITY_THRESHOLD_MPS: float = 0.05  # |v_x| < 0.05 m/s
 STANDSTILL_MIN_DURATION_S: float = 0.5           # continuous duration required at standstill
 STANDSTILL_BUFFER_CAPACITY: int = 100            # ring buffer capacity (2.0s at 50 Hz)
+FINISH_STANDSTILL_TIMEOUT_S: float = 5.0         # mission finished but still moving -> AS_Emergency
 
 # Watchdog timeout limits
 VCU_WATCHDOG_TIMEOUT_S: float = 0.2              # 200 ms timeout per FSAE rules

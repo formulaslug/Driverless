@@ -234,14 +234,3 @@ def test_level2_external_planner_watchdog_timeout() -> None:
     assert status.current_state == MacroState.AS_EMERGENCY
     assert status.error_code & DiagnosticErrorCode.WATCHDOG_TIMEOUT_LEVEL2
     assert act.gated is False
-
-
-def test_state_self_transition_preserves_entry_time(state_machine: Level1StateMachine) -> None:
-    """Invoking _set_state on an already-active state does not re-stamp entry time."""
-    tel = make_ready_telemetry(timestamp=1.0)
-    state_machine.step(tel)
-    initial_entry_time = state_machine._state_entry_time
-
-    # Attempt re-setting to AS_READY at t = 2.0
-    state_machine._set_state(MacroState.AS_READY, tel, now=2.0)
-    assert state_machine._state_entry_time == initial_entry_time

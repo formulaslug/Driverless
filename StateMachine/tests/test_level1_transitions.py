@@ -184,8 +184,7 @@ def test_state_transition_and_emergency_logging(state_machine: Level1StateMachin
 
         # Trigger emergency trip
         state_machine.request_emergency_trip(DiagnosticErrorCode.SDC_OPEN, timestamp=1.02)
-        assert any("EMERGENCY TRIP LATCHED!" in record.message for record in caplog.records)
-        assert any("SDC_OPEN" in record.message for record in caplog.records)
+        assert any("EMERGENCY TRIP: SDC_OPEN" in record.message for record in caplog.records)
 
 
 def test_telemetry_safety_fields_are_required() -> None:
