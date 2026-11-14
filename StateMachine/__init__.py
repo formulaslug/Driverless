@@ -11,9 +11,9 @@ from StateMachine.constants import (
     VCU_WATCHDOG_TIMEOUT_S,
     LEVEL2_WATCHDOG_TIMEOUT_S,
 )
-from StateMachine.standstill_detector import StandstillDetector
-from StateMachine.gatekeeper import ActuationGatekeeper
-from StateMachine.level1_state_machine import (
+from StateMachine.standstill_detector import StandstillDetector  # noqa: E402
+from StateMachine.gatekeeper import gate_command  # noqa: E402
+from StateMachine.level1_state_machine import (  # noqa: E402
     Level1StateMachine,
     unpack_diagnostic_flags,
     VALID_DRIVERLESS_MISSIONS,
@@ -41,7 +41,7 @@ __all__ = [
     "VCU_WATCHDOG_TIMEOUT_S",
     "LEVEL2_WATCHDOG_TIMEOUT_S",
     "StandstillDetector",
-    "ActuationGatekeeper",
+    "gate_command",
     "Level1StateMachine",
     "unpack_diagnostic_flags",
     "VALID_DRIVERLESS_MISSIONS",

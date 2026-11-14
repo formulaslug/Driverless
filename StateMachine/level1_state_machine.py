@@ -24,7 +24,7 @@ from StateMachine.constants import (
     HEARTBEAT_MAX,
 )
 from StateMachine.standstill_detector import StandstillDetector
-from StateMachine.gatekeeper import ActuationGatekeeper
+from StateMachine.gatekeeper import gate_command
 from StateMachine.level2.base import MissionBehavior, MissionContext, SubStateResult
 from StateMachine.level2.registry import MissionRegistry
 
@@ -325,7 +325,7 @@ class Level1StateMachine:
                 raw_cmd = self._step_manual_driving(telemetry, now)
 
         # 3. Gated Actuation Filter
-        gated_cmd = ActuationGatekeeper.gate_command(
+        gated_cmd = gate_command(
             state=self._state,
             requested_command=raw_cmd,
             timestamp=now,

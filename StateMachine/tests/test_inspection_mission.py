@@ -73,3 +73,14 @@ def test_inspection_mission_lifecycle_and_substates() -> None:
     res_stop_still = mission.update(make_ctx(9.0, vx=0.0))
     assert mission.current_substate == InspectionSubState.COMPLETE
     assert res_stop_still.mission_finished is True
+
+
+def test_inspection_accepts_0d_velocity() -> None:
+    """A 0-D velocity is normalized by the message, so CONTROLLED_STOP can read velocity[0]."""
+    mission = InspectionMission()
+    tel = VcuTelemetryMessage(timestamp=0.0, ebs_status=EbsStatus.ARMED, velocity=np.float64(0.0))
+    assert tel.velocity.shape == (1,)
+    mission.on_enter(MissionContext(telemetry=tel, dt=0.0, mission_time=0.0, current_substate="INIT"))
+    for t in (4.0, 8.0, 8.6):
+        result = mission.update(MissionContext(telemetry=tel, dt=0.02, mission_time=t, current_substate=""))
+    assert result.mission_finished is True

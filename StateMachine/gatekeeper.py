@@ -1,6 +1,16 @@
-"""Level 3 Actuation Safety Multiplexer and Gatekeeper."""
+"""Level 3 actuation safety gate.
 
-from typing import Optional
+Every outgoing actuator command passes through ``gate_command``:
+- AS_Driving: a valid command is clamped to physical limits and passed through
+  (``gated=True``). A missing, non-finite or mis-shaped command is replaced by a
+  service-brake stop.
+- Every other state: throttle and steering are forced to zero and the brake is
+  set by the state (service brake in AS_Ready, EBS in AS_Finished/AS_Emergency,
+  released in AS_Off/Manual).
+"""
+
+from typing import Optional, Tuple
+
 import numpy as np
 
 from Pipeline.messages import MacroState, ActuationCommandMessage
@@ -17,102 +27,49 @@ from StateMachine.constants import (
     STEERING_MAX_RAD,
 )
 
+# Brake held in each state when actuation is not passed through.
+_HOLD_BRAKE = {
+    MacroState.AS_READY: BRAKE_SERVICE_NORM,
+    MacroState.AS_DRIVING: BRAKE_SERVICE_NORM,
+    MacroState.AS_FINISHED: BRAKE_EBS_NORM,
+    MacroState.AS_EMERGENCY: BRAKE_EBS_NORM,
+}
 
-class ActuationGatekeeper:
-    """Safety multiplexer enforcing Level 1 actuation gating policies.
-    
-    Acts as the single point of control for outgoing actuator messages:
-    - In AS_Driving: Sanitizes, validates (NaN/Inf check), and clamps requested commands.
-      If no command is provided, clamps fail-safe service brake.
-    - In AS_Ready: Zeroes throttle and steering; commands full service brake.
-    - In AS_Finished: Zeroes throttle and steering; commands full EBS braking.
-    - In AS_Emergency: Zeroes throttle and steering; commands full EBS braking.
-    - In AS_Off / Manual: Zeroes throttle and steering; releases brakes.
-    """
 
-    @staticmethod
-    def gate_command(
-        state: MacroState,
-        requested_command: Optional[ActuationCommandMessage],
-        timestamp: float,
-    ) -> ActuationCommandMessage:
-        """Filter and sanitize requested actuation commands according to the active macro-state.
-        
-        Args:
-            state: Current Level 1 MacroState.
-            requested_command: Raw actuation command requested by Level 2 / Controls.
-            timestamp: Current monotonic evaluation timestamp.
-            
-        Returns:
-            Gated ActuationCommandMessage safe for transmission to the VCU bridge.
-        """
-        # Determine command array shape for zeroed fallbacks
-        shape = (1,)
-        if requested_command is not None and isinstance(requested_command.steering, np.ndarray):
-            shape = requested_command.steering.shape
+def _stop_command(timestamp: float, shape: Tuple[int, ...], braking: float) -> ActuationCommandMessage:
+    return ActuationCommandMessage(
+        timestamp=timestamp,
+        steering=np.full(shape, STEERING_ZERO_RAD),
+        throttle=np.full(shape, THROTTLE_ZERO_NORM),
+        braking=np.full(shape, braking),
+        gated=False,
+    )
 
-        # In AS_Driving, evaluate requested commands
-        if state == MacroState.AS_DRIVING:
-            if requested_command is not None:
-                steering = np.asarray(requested_command.steering, dtype=np.float64)
-                throttle = np.asarray(requested_command.throttle, dtype=np.float64)
-                braking = np.asarray(requested_command.braking, dtype=np.float64)
 
-                # Reject corrupted or unbounded commands (NaN / Inf protection)
-                has_invalid_floats = (
-                    np.any(np.isnan(steering))
-                    or np.any(np.isnan(throttle))
-                    or np.any(np.isnan(braking))
-                    or np.any(np.isinf(steering))
-                    or np.any(np.isinf(throttle))
-                    or np.any(np.isinf(braking))
-                )
-                if has_invalid_floats:
-                    return ActuationCommandMessage(
-                        timestamp=timestamp,
-                        steering=np.full(shape, STEERING_ZERO_RAD, dtype=np.float64),
-                        throttle=np.full(shape, THROTTLE_ZERO_NORM, dtype=np.float64),
-                        braking=np.full(shape, BRAKE_SERVICE_NORM, dtype=np.float64),
-                        gated=False,
-                    )
+def _is_valid(cmd: ActuationCommandMessage) -> bool:
+    arrays = (cmd.steering, cmd.throttle, cmd.braking)
+    same_shape = cmd.steering.shape == cmd.throttle.shape == cmd.braking.shape
+    return same_shape and all(np.isfinite(a).all() for a in arrays)
 
-                # Clamp valid commands to safe physical and normalized bounds
-                steering = np.clip(steering, -STEERING_MAX_RAD, STEERING_MAX_RAD)
-                throttle = np.clip(throttle, THROTTLE_MIN_NORM, THROTTLE_MAX_NORM)
-                braking = np.clip(braking, BRAKE_MIN_NORM, BRAKE_MAX_NORM)
 
-                return ActuationCommandMessage(
-                    timestamp=timestamp,
-                    steering=steering,
-                    throttle=throttle,
-                    braking=braking,
-                    gated=True,
-                )
-            else:
-                # Safe fallback in driving when no command is available: clamp service brake
-                return ActuationCommandMessage(
-                    timestamp=timestamp,
-                    steering=np.full(shape, STEERING_ZERO_RAD, dtype=np.float64),
-                    throttle=np.full(shape, THROTTLE_ZERO_NORM, dtype=np.float64),
-                    braking=np.full(shape, BRAKE_SERVICE_NORM, dtype=np.float64),
-                    gated=False,
-                )
+def gate_command(
+    state: MacroState,
+    requested_command: Optional[ActuationCommandMessage],
+    timestamp: float,
+) -> ActuationCommandMessage:
+    """Return the actuation command that is safe to send to the VCU in ``state``."""
+    shape = requested_command.steering.shape if requested_command is not None else (1,)
 
-        # In all non-driving states, enforce zeroed throttle and steering
-        steering = np.full(shape, STEERING_ZERO_RAD, dtype=np.float64)
-        throttle = np.full(shape, THROTTLE_ZERO_NORM, dtype=np.float64)
+    if state != MacroState.AS_DRIVING or requested_command is None:
+        return _stop_command(timestamp, shape, _HOLD_BRAKE.get(state, BRAKE_ZERO_NORM))
 
-        if state == MacroState.AS_READY:
-            braking = np.full(shape, BRAKE_SERVICE_NORM, dtype=np.float64)
-        elif state in (MacroState.AS_FINISHED, MacroState.AS_EMERGENCY):
-            braking = np.full(shape, BRAKE_EBS_NORM, dtype=np.float64)
-        else:
-            braking = np.full(shape, BRAKE_ZERO_NORM, dtype=np.float64)
+    if not _is_valid(requested_command):
+        return _stop_command(timestamp, shape, BRAKE_SERVICE_NORM)
 
-        return ActuationCommandMessage(
-            timestamp=timestamp,
-            steering=steering,
-            throttle=throttle,
-            braking=braking,
-            gated=False,
-        )
+    return ActuationCommandMessage(
+        timestamp=timestamp,
+        steering=np.clip(requested_command.steering, -STEERING_MAX_RAD, STEERING_MAX_RAD),
+        throttle=np.clip(requested_command.throttle, THROTTLE_MIN_NORM, THROTTLE_MAX_NORM),
+        braking=np.clip(requested_command.braking, BRAKE_MIN_NORM, BRAKE_MAX_NORM),
+        gated=True,
+    )

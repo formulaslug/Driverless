@@ -4,7 +4,7 @@ import pytest
 import numpy as np
 
 from Pipeline.messages import MacroState, ActuationCommandMessage
-from StateMachine.gatekeeper import ActuationGatekeeper
+from StateMachine.gatekeeper import gate_command
 
 
 def test_gatekeeper_pass_through_in_as_driving() -> None:
@@ -17,7 +17,7 @@ def test_gatekeeper_pass_through_in_as_driving() -> None:
         gated=False,
     )
 
-    gated = ActuationGatekeeper.gate_command(MacroState.AS_DRIVING, req, timestamp=10.0)
+    gated = gate_command(MacroState.AS_DRIVING, req, timestamp=10.0)
     assert gated.gated is True
     assert np.isclose(gated.steering[0], 0.15)
     assert np.isclose(gated.throttle[0], 0.45)
@@ -47,7 +47,7 @@ def test_gatekeeper_zeroing_in_non_driving_states(
         gated=True,
     )
 
-    gated = ActuationGatekeeper.gate_command(non_driving_state, malicious_cmd, timestamp=5.0)
+    gated = gate_command(non_driving_state, malicious_cmd, timestamp=5.0)
     assert gated.gated is False
     assert np.allclose(gated.throttle, 0.0)
     assert np.allclose(gated.steering, 0.0)
@@ -56,7 +56,7 @@ def test_gatekeeper_zeroing_in_non_driving_states(
 
 def test_gatekeeper_handles_none_command() -> None:
     """Gatekeeper handles None requested_command gracefully, producing safe defaults."""
-    gated = ActuationGatekeeper.gate_command(MacroState.AS_READY, None, timestamp=1.0)
+    gated = gate_command(MacroState.AS_READY, None, timestamp=1.0)
     assert gated.gated is False
     assert np.allclose(gated.throttle, 0.0)
     assert np.allclose(gated.steering, 0.0)
@@ -73,7 +73,7 @@ def test_gatekeeper_trajectory_shape_preservation() -> None:
         gated=True,
     )
 
-    gated = ActuationGatekeeper.gate_command(MacroState.AS_EMERGENCY, horizon_req, timestamp=2.0)
+    gated = gate_command(MacroState.AS_EMERGENCY, horizon_req, timestamp=2.0)
     assert gated.gated is False
     assert gated.steering.shape == (10, 1)
     assert np.allclose(gated.steering, 0.0)
@@ -90,7 +90,7 @@ def test_gatekeeper_rejects_nan_and_inf_commands() -> None:
         throttle=np.array([np.nan], dtype=np.float64),
         braking=np.array([0.0], dtype=np.float64),
     )
-    gated_nan = ActuationGatekeeper.gate_command(MacroState.AS_DRIVING, nan_cmd, timestamp=1.0)
+    gated_nan = gate_command(MacroState.AS_DRIVING, nan_cmd, timestamp=1.0)
     assert gated_nan.gated is False
     assert np.allclose(gated_nan.throttle, 0.0)
     assert np.allclose(gated_nan.steering, 0.0)
@@ -103,7 +103,7 @@ def test_gatekeeper_rejects_nan_and_inf_commands() -> None:
         throttle=np.array([0.5], dtype=np.float64),
         braking=np.array([0.0], dtype=np.float64),
     )
-    gated_inf = ActuationGatekeeper.gate_command(MacroState.AS_DRIVING, inf_cmd, timestamp=1.0)
+    gated_inf = gate_command(MacroState.AS_DRIVING, inf_cmd, timestamp=1.0)
     assert gated_inf.gated is False
     assert np.allclose(gated_inf.throttle, 0.0)
     assert np.allclose(gated_inf.steering, 0.0)
@@ -118,7 +118,7 @@ def test_gatekeeper_clamps_out_of_bounds_actuation() -> None:
         throttle=np.array([1.80], dtype=np.float64),   # Exceeds 100%
         braking=np.array([-0.30], dtype=np.float64),   # Negative brake request
     )
-    gated = ActuationGatekeeper.gate_command(MacroState.AS_DRIVING, excessive_cmd, timestamp=2.0)
+    gated = gate_command(MacroState.AS_DRIVING, excessive_cmd, timestamp=2.0)
     assert gated.gated is True
     assert np.isclose(gated.steering[0], 0.4363)
     assert np.isclose(gated.throttle[0], 1.0)
@@ -127,8 +127,26 @@ def test_gatekeeper_clamps_out_of_bounds_actuation() -> None:
 
 def test_gatekeeper_failsafe_on_none_in_driving() -> None:
     """If requested command is None in AS_Driving, fail-safe service brake is applied."""
-    gated = ActuationGatekeeper.gate_command(MacroState.AS_DRIVING, None, timestamp=3.0)
+    gated = gate_command(MacroState.AS_DRIVING, None, timestamp=3.0)
     assert gated.gated is False
     assert np.allclose(gated.throttle, 0.0)
     assert np.allclose(gated.steering, 0.0)
+    assert np.allclose(gated.braking, 1.0)
+
+
+def test_scalar_inputs_are_normalized_to_1d() -> None:
+    """Python floats and 0-D arrays become shape (1,) so callers can always index [0]."""
+    cmd = ActuationCommandMessage(timestamp=0.0, steering=0.1, throttle=np.float64(0.2), braking=0.0)
+    gated = gate_command(MacroState.AS_DRIVING, cmd, timestamp=0.0)
+    assert gated.gated is True
+    assert gated.steering.shape == gated.throttle.shape == gated.braking.shape == (1,)
+    assert np.isclose(gated.throttle[0], 0.2)
+
+
+def test_mismatched_shapes_fall_back_to_service_brake() -> None:
+    """A command whose channels disagree in shape is rejected, not passed through."""
+    cmd = ActuationCommandMessage(timestamp=0.0, steering=np.zeros(3), throttle=np.ones(1), braking=np.zeros(1))
+    gated = gate_command(MacroState.AS_DRIVING, cmd, timestamp=0.0)
+    assert gated.gated is False
+    assert np.allclose(gated.throttle, 0.0)
     assert np.allclose(gated.braking, 1.0)

@@ -79,6 +79,14 @@ class VcuTelemetryMessage:
     res_go_signal: bool = False
     velocity: np.ndarray = field(default_factory=lambda: np.zeros(3, dtype=np.float64))
 
+    def __post_init__(self) -> None:
+        self.velocity = as_float_array(self.velocity)
+
+
+def as_float_array(value) -> np.ndarray:
+    """Canonical array form for numeric message fields: float64, at least 1-D."""
+    return np.atleast_1d(np.asarray(value, dtype=np.float64))
+
 
 @dataclass
 class Level2StatusMessage:
@@ -99,6 +107,12 @@ class ActuationCommandMessage:
     throttle: np.ndarray = field(default_factory=lambda: np.zeros(1, dtype=np.float64))
     braking: np.ndarray = field(default_factory=lambda: np.zeros(1, dtype=np.float64))
     gated: bool = False
+
+    def __post_init__(self) -> None:
+        # Accept floats, 0-D arrays or lists, but always store float64 arrays of ndim >= 1.
+        self.steering = as_float_array(self.steering)
+        self.throttle = as_float_array(self.throttle)
+        self.braking = as_float_array(self.braking)
 
 
 @dataclass
