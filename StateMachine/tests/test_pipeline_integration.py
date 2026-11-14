@@ -14,7 +14,7 @@ from Pipeline.messages import (
     StateMachineStatusMessage,
     ActuationCommandMessage,
 )
-from StateMachine.node import StateMachineNode
+from StateMachine.state_machine_node import StateMachineNode
 from StateMachine.mock_vcu import MockVcuNode, MockVcuSimulator
 
 

@@ -17,7 +17,7 @@ from Pipeline.messages import (
 )
 from StateMachine.constants import STATE_MACHINE_DEFAULT_DT_S
 from StateMachine.level1_state_machine import Level1StateMachine
-from StateMachine.node import StateMachineNode
+from StateMachine.state_machine_node import StateMachineNode
 
 
 class MockVcuSimulator:
