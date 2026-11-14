@@ -9,13 +9,12 @@ from Pipeline.messages import (
     EbsStatus,
     Mission,
     DiagnosticErrorCode,
-    VcuTelemetryMessage,
     ActuationCommandMessage,
 )
 from StateMachine.level1_state_machine import Level1StateMachine
 from StateMachine.level2.base import MissionBehavior, MissionContext, SubStateResult
 from StateMachine.level2.registry import MissionRegistry
-from StateMachine.tests.conftest import make_ready_telemetry, make_telemetry
+from StateMachine.tests.conftest import drive_to_as_driving, make_ready_telemetry, make_telemetry
 
 
 def test_vcu_watchdog_timeout_trips_emergency(state_machine: Level1StateMachine) -> None:
@@ -234,3 +233,40 @@ def test_level2_external_planner_watchdog_timeout() -> None:
     assert status.current_state == MacroState.AS_EMERGENCY
     assert status.error_code & DiagnosticErrorCode.WATCHDOG_TIMEOUT_LEVEL2
     assert act.gated is False
+
+
+@pytest.mark.parametrize(
+    "fault_patch, expected_fault",
+    [
+        ({"ebs_status": EbsStatus.ACTIVATED}, DiagnosticErrorCode.EBS_ACTIVATED_UNEXPECTED),  # flowchart arrow
+        ({"sdc_status": False}, DiagnosticErrorCode.SDC_OPEN),
+        ({"dsms_status": False}, DiagnosticErrorCode.DSMS_UNEXPECTED_DROP),
+        ({"ts_status": False}, DiagnosticErrorCode.TS_INACTIVE),
+    ],
+)
+def test_driving_hardware_fault_trips_emergency(fault_patch: dict, expected_fault: DiagnosticErrorCode) -> None:
+    """AS_Driving -> AS_Emergency on EBS activation (flowchart.png) and the hardware safety extensions."""
+    sm = Level1StateMachine()
+    t = drive_to_as_driving(sm)
+    status, act = sm.step(make_ready_telemetry(timestamp=t + 0.02, **fault_patch))
+    assert status.current_state == MacroState.AS_EMERGENCY
+    assert status.error_code == expected_fault
+    assert status.ebs_trigger_cmd is True
+    assert act.gated is False and np.allclose(act.throttle, 0.0)
+
+
+def test_level2_on_enter_exception_trips_emergency() -> None:
+    """A mission that crashes while starting must not leave the car in AS_Driving."""
+    class BrokenStart(CrashingMission):
+        def on_enter(self, context: MissionContext) -> None:
+            raise RuntimeError("bad calibration file")
+
+    sm = Level1StateMachine(mission_behavior=BrokenStart())
+    t = 1.0
+    sm.step(make_ready_telemetry(timestamp=t))
+    for _ in range(260):
+        t += 0.02
+        sm.step(make_ready_telemetry(timestamp=t))
+    status, _ = sm.step(make_ready_telemetry(timestamp=t + 0.02, res_go=True))
+    assert status.current_state == MacroState.AS_EMERGENCY
+    assert status.error_code == DiagnosticErrorCode.LEVEL2_EXCEPTION
