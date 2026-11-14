@@ -79,12 +79,52 @@ _BIT_INDICES: np.ndarray = np.arange(16, dtype=np.int32)
 
 
 def unpack_diagnostic_flags(error_code: int) -> np.ndarray:
-    """Vectorized unpacking of an integer error bitmask into a 16-element bool array."""
+    """Unpacks an error bitmask into a boolean array, one element per bit.
+
+    Args:
+        error_code: DiagnosticErrorCode bitmask.
+
+    Returns:
+        A 16-element bool array where index i is True if bit i is set.
+    """
     return ((int(error_code) >> _BIT_INDICES) & 1).astype(bool)
 
 
 class Level1StateMachine:
-    """FSAE Driverless Level 1 macro-state machine. See the module docstring for the arrows."""
+    """Deterministic FSAE Driverless Level 1 macro-state machine.
+
+    Owns the rule-mandated safety states and gates every Level 3 actuation
+    command. The module docstring lists each transition and whether it comes
+    from flowchart.png or is a safety extension.
+
+    Typical usage example:
+
+        state_machine = Level1StateMachine()
+        status, actuation = state_machine.step(telemetry=tel)
+
+    Args:
+        mission_behavior: Optional Level 2 mission to run in every AS_DRIVING
+            run. If None, the mission is created from the MissionRegistry for
+            the mission committed on entering AS_READY; if none is
+            registered, an external planner is expected to drive.
+
+    Attributes:
+        current_state: The active MacroState.
+        dssi_status: DSSI light state for the active macro-state.
+        error_code: DiagnosticErrorCode bitmask of latched faults. Cleared on
+            entering AS_OFF.
+        heartbeat: Counter incremented on every output, wrapping at
+            HEARTBEAT_MAX.
+        active_mission: Mission committed on entering AS_READY, or
+            NOT_SELECTED in AS_OFF.
+        active_substate_name: Level 2 sub-state label, "EXTERNAL_PLANNER"
+            when an external planner drives, or "NONE".
+        ebs_trigger_cmd: True when EBS must be engaged (AS_FINISHED,
+            AS_EMERGENCY).
+        service_brake_cmd: True when the service brake must be held
+            (AS_READY, AS_EMERGENCY).
+        ready_timer_elapsed: Seconds spent in AS_READY, or 0.0 elsewhere.
+    """
 
     def __init__(self, mission_behavior: Optional[MissionBehavior] = None) -> None:
         self._state = MacroState.AS_OFF
@@ -158,10 +198,22 @@ class Level1StateMachine:
         external_actuation: Optional[ActuationCommandMessage] = None,
         external_status: Optional[Level2StatusMessage] = None,
     ) -> Outputs:
-        """Run one cycle on a fresh VCU telemetry packet.
+        """Runs one state machine cycle on a fresh VCU telemetry packet.
 
-        ``external_actuation`` / ``external_status`` come from an external Level 2
-        planner and are only used when no registered mission is running.
+        Order of work: VCU packet-gap watchdog, the active state's checks and
+        transitions, then actuation gating for the resulting state.
+
+        Args:
+            telemetry: Latest VCU telemetry packet.
+            external_actuation: Latest command from an external Level 2
+                planner. Only used in AS_DRIVING when no registered mission
+                is running, and only if newer than LEVEL2_WATCHDOG_TIMEOUT_S.
+            external_status: Latest status from that external planner, used
+                to report its sub-state, mission finished or e-stop.
+
+        Returns:
+            A (StateMachineStatusMessage, ActuationCommandMessage) pair. The
+            actuation command is always safe to send to the VCU.
         """
         now = telemetry.timestamp
         # Keep the time as a float: callers may reuse and mutate message objects.
@@ -175,26 +227,35 @@ class Level1StateMachine:
             self._trip_emergency(DiagnosticErrorCode.WATCHDOG_TIMEOUT_VCU, now)
 
         raw_cmd = None
-        if self._state == MacroState.AS_OFF:
-            self._step_as_off(telemetry, now)
-        elif self._state == MacroState.AS_READY:
-            self._step_as_ready(telemetry, now)
-        elif self._state == MacroState.AS_DRIVING:
-            raw_cmd = self._step_as_driving(telemetry, dt, now, external_actuation, external_status)
-        elif self._state == MacroState.AS_FINISHED:
-            self._step_as_finished(telemetry, now)
-        elif self._state == MacroState.AS_EMERGENCY:
-            self._step_as_emergency(telemetry, now)
-        elif self._state == MacroState.MANUAL_DRIVING:
-            self._step_manual_driving(telemetry, now)
+        match self._state:
+            case MacroState.AS_OFF:
+                self._step_as_off(telemetry, now)
+            case MacroState.AS_READY:
+                self._step_as_ready(telemetry, now)
+            case MacroState.AS_DRIVING:
+                raw_cmd = self._step_as_driving(telemetry, dt, now, external_actuation, external_status)
+            case MacroState.AS_FINISHED:
+                self._step_as_finished(telemetry, now)
+            case MacroState.AS_EMERGENCY:
+                self._step_as_emergency(telemetry, now)
+            case MacroState.MANUAL_DRIVING:
+                self._step_manual_driving(telemetry, now)
 
         return self._outputs(now, raw_cmd)
 
     def handle_telemetry_timeout(self, now: float) -> Optional[Outputs]:
-        """Called when no telemetry has arrived for VCU_WATCHDOG_TIMEOUT_S.
+        """Trips the VCU watchdog when telemetry has stopped arriving.
 
-        Unlike the packet-gap check in step(), this fires while the link is still
-        dead. Returns the outputs to publish, or None if this state ignores link loss.
+        Called by StateMachineNode's watchdog thread after
+        VCU_WATCHDOG_TIMEOUT_S without a packet. Unlike the packet-gap check
+        in step(), this fires while the link is still dead.
+
+        Args:
+            now: Trip time on the telemetry clock.
+
+        Returns:
+            The (status, actuation) outputs to publish, or None if the current
+            state does not watch the VCU link (only AS_READY and AS_DRIVING do).
         """
         if self._state not in VCU_WATCHDOG_STATES:
             return None
@@ -202,7 +263,12 @@ class Level1StateMachine:
         return self._outputs(now, None)
 
     def request_emergency_trip(self, fault: DiagnosticErrorCode, timestamp: float) -> None:
-        """Trip immediately into AS_Emergency with a specific fault code."""
+        """Trips immediately into AS_EMERGENCY.
+
+        Args:
+            fault: Fault flag to latch into error_code.
+            timestamp: Trip time on the telemetry clock.
+        """
         self._trip_emergency(fault, timestamp)
 
     # -----------------------------------------------------------------------
@@ -210,6 +276,15 @@ class Level1StateMachine:
     # -----------------------------------------------------------------------
 
     def _step_as_off(self, tel: VcuTelemetryMessage, now: float) -> None:
+        """Enters MANUAL_DRIVING or AS_READY when the flowchart conditions hold.
+
+        Manual driving is checked first. Entering AS_READY commits the
+        selected mission for the rest of the run.
+
+        Args:
+            tel: Latest VCU telemetry packet.
+            now: Current telemetry timestamp.
+        """
         if (
             tel.ami_mission == Mission.MANUAL
             and tel.ebs_status == EbsStatus.UNAVAILABLE
@@ -232,6 +307,23 @@ class Level1StateMachine:
             self._set_state(MacroState.AS_READY, now)
 
     def _step_as_ready(self, tel: VcuTelemetryMessage, now: float) -> None:
+        """Evaluates AS_READY faults, exit, and the RES Go start sequence.
+
+        Checks run in priority order:
+
+            1. Faults: an open SDC or an activated EBS trips AS_EMERGENCY.
+            2. Clean exit: ASMS off with brakes released returns to AS_OFF.
+            3. Lockout: RES Go is ignored for AS_READY_LOCKOUT_DURATION_S, and
+               a press during the lockout is remembered as premature.
+            4. Premature press: it must be released before a new press counts,
+               so holding RES Go through the lockout cannot start the mission.
+            5. Start: a fresh press enters AS_DRIVING if EBS is armed and ASMS,
+               TS and the DBS check are still good.
+
+        Args:
+            tel: Latest VCU telemetry packet.
+            now: Current telemetry timestamp.
+        """
         if not tel.sdc_status:
             self._trip_emergency(DiagnosticErrorCode.SDC_OPEN, now)
             return
@@ -268,6 +360,24 @@ class Level1StateMachine:
         external_cmd: Optional[ActuationCommandMessage],
         external_status: Optional[Level2StatusMessage],
     ) -> Optional[ActuationCommandMessage]:
+        """Runs Level 2 and evaluates AS_DRIVING faults and completion.
+
+        Hardware faults trip first. Then the registered mission (or the
+        external planner) produces a result: an e-stop trips AS_EMERGENCY, and
+        "mission finished" enters AS_FINISHED once the car is at standstill,
+        or trips STANDSTILL_TIMEOUT if it is still moving after
+        FINISH_STANDSTILL_TIMEOUT_S.
+
+        Args:
+            tel: Latest VCU telemetry packet.
+            dt: Seconds since the previous packet.
+            now: Current telemetry timestamp.
+            external_cmd: Latest external planner command, if any.
+            external_status: Latest external planner status, if any.
+
+        Returns:
+            The requested actuation command, or None to stop the car.
+        """
         hardware_faults = (
             (not tel.sdc_status, DiagnosticErrorCode.SDC_OPEN),
             (tel.ebs_status == EbsStatus.ACTIVATED, DiagnosticErrorCode.EBS_ACTIVATED_UNEXPECTED),
@@ -307,15 +417,33 @@ class Level1StateMachine:
         return result.actuation_command
 
     def _step_as_finished(self, tel: VcuTelemetryMessage, now: float) -> None:
+        """Returns to AS_OFF once ASMS is off and the brakes are released.
+
+        Args:
+            tel: Latest VCU telemetry packet.
+            now: Current telemetry timestamp.
+        """
         if not tel.dsms_status and not tel.brake_status:
             self._set_state(MacroState.AS_OFF, now)
 
     def _step_as_emergency(self, tel: VcuTelemetryMessage, now: float) -> None:
+        """Returns to AS_OFF once EBS sound, ASMS and brakes are all off.
+
+        Args:
+            tel: Latest VCU telemetry packet.
+            now: Current telemetry timestamp.
+        """
         if not tel.ebs_sound_active and not tel.dsms_status and not tel.brake_status:
             logger.info("EMERGENCY CLEARED at t=%.3fs (faults were %r)", now, self._error_code)
             self._set_state(MacroState.AS_OFF, now)
 
     def _step_manual_driving(self, tel: VcuTelemetryMessage, now: float) -> None:
+        """Returns to AS_OFF when the tractive system turns off.
+
+        Args:
+            tel: Latest VCU telemetry packet.
+            now: Current telemetry timestamp.
+        """
         if not tel.ts_status:
             self._set_state(MacroState.AS_OFF, now)
 
@@ -324,6 +452,16 @@ class Level1StateMachine:
     # -----------------------------------------------------------------------
 
     def _start_mission(self, tel: VcuTelemetryMessage, now: float) -> None:
+        """Creates and enters the Level 2 mission right after RES Go.
+
+        Uses the injected mission if there is one, otherwise the registry.
+        With neither, an external planner is expected to drive. A crash in
+        on_enter trips LEVEL2_EXCEPTION.
+
+        Args:
+            tel: Telemetry packet that triggered AS_DRIVING.
+            now: Current telemetry timestamp.
+        """
         self._mission_start_time = now
         self._finish_requested_time = None
         self._standstill.reset()
@@ -343,6 +481,16 @@ class Level1StateMachine:
             self._trip_emergency(DiagnosticErrorCode.LEVEL2_EXCEPTION, now)
 
     def _run_mission(self, tel: VcuTelemetryMessage, dt: float, now: float) -> Optional[SubStateResult]:
+        """Calls the registered mission's update, tripping on any exception.
+
+        Args:
+            tel: Latest VCU telemetry packet.
+            dt: Seconds since the previous packet.
+            now: Current telemetry timestamp.
+
+        Returns:
+            The mission's SubStateResult, or None if it raised.
+        """
         try:
             return self._behavior.update(self._context(tel, dt, now))
         except Exception:
@@ -356,6 +504,17 @@ class Level1StateMachine:
         cmd: Optional[ActuationCommandMessage],
         status: Optional[Level2StatusMessage],
     ) -> Optional[SubStateResult]:
+        """Builds a SubStateResult from an external planner's messages.
+
+        Args:
+            now: Current telemetry timestamp.
+            cmd: Latest planner command. Missing or older than
+                LEVEL2_WATCHDOG_TIMEOUT_S trips WATCHDOG_TIMEOUT_LEVEL2.
+            status: Latest planner status. Ignored if it predates this run.
+
+        Returns:
+            The planner's result, or None if the Level 2 watchdog tripped.
+        """
         if cmd is None or now - cmd.timestamp > LEVEL2_WATCHDOG_TIMEOUT_S:
             self._trip_emergency(DiagnosticErrorCode.WATCHDOG_TIMEOUT_LEVEL2, now)
             return None
@@ -370,6 +529,7 @@ class Level1StateMachine:
         )
 
     def _context(self, tel: VcuTelemetryMessage, dt: float, now: float) -> MissionContext:
+        """Builds the MissionContext passed to Level 2 callbacks."""
         return MissionContext(
             telemetry=tel,
             dt=dt,
@@ -382,6 +542,16 @@ class Level1StateMachine:
     # -----------------------------------------------------------------------
 
     def _set_state(self, new_state: MacroState, now: float) -> None:
+        """Performs a transition and its entry and exit side effects.
+
+        Leaving AS_DRIVING calls the mission's on_exit. Entering AS_READY
+        starts the lockout timer. Entering AS_OFF clears faults and the
+        committed mission. A transition to the current state does nothing.
+
+        Args:
+            new_state: State to enter.
+            now: Current telemetry timestamp.
+        """
         old_state = self._state
         if old_state == new_state:
             return
@@ -407,6 +577,12 @@ class Level1StateMachine:
             self._substate = "NONE"
 
     def _stop_mission(self, now: float, interrupted: bool) -> None:
+        """Calls the mission's on_exit and drops it. Exceptions are logged.
+
+        Args:
+            now: Current telemetry timestamp.
+            interrupted: True when AS_DRIVING ends in AS_EMERGENCY.
+        """
         if self._behavior is not None and self._last_telemetry is not None:
             try:
                 self._behavior.on_exit(self._context(self._last_telemetry, 0.0, now), interrupted=interrupted)
@@ -415,6 +591,12 @@ class Level1StateMachine:
         self._behavior = None
 
     def _trip_emergency(self, fault: DiagnosticErrorCode, now: float) -> None:
+        """Latches a fault, logs it with the running mission, and enters AS_EMERGENCY.
+
+        Args:
+            fault: Fault flag to latch into error_code.
+            now: Current telemetry timestamp.
+        """
         self._error_code |= fault
         logger.critical(
             "EMERGENCY TRIP: %s [faults=%r, from=%s, mission=%s, substate=%s, t=%.3fs]",
@@ -428,6 +610,15 @@ class Level1StateMachine:
         self._set_state(MacroState.AS_EMERGENCY, now)
 
     def _outputs(self, now: float, raw_cmd: Optional[ActuationCommandMessage]) -> Outputs:
+        """Builds the status message and the gated actuation command.
+
+        Args:
+            now: Current telemetry timestamp.
+            raw_cmd: Requested actuation, or None to stop the car.
+
+        Returns:
+            A (StateMachineStatusMessage, ActuationCommandMessage) pair.
+        """
         self._heartbeat = (self._heartbeat + 1) & HEARTBEAT_MAX
         status = StateMachineStatusMessage(
             timestamp=now,
