@@ -1,44 +1,61 @@
-"""Mock Vehicle Control Unit (VCU) simulator and interactive pipeline test harness."""
+"""Mock Vehicle Control Unit (VCU) simulator and interactive test harness.
 
-import time
+Run from the repository root:
+    python -m StateMachine.mock_vcu                 # all automated scenarios
+    python -m StateMachine.mock_vcu --scenario sdc-trip
+    python -m StateMachine.mock_vcu -i              # interactive shell
+"""
+
 import argparse
-from typing import Optional, Generator, List
+import time
+from typing import Callable, Generator, Optional
+
 import numpy as np
 
-from Pipeline.node import SourceNode, Node
+from Pipeline.node import SourceNode
 from Pipeline.messages import (
-    EbsStatus,
-    Mission,
-    MacroState,
-    DSSIStatus,
-    VcuTelemetryMessage,
-    StateMachineStatusMessage,
     ActuationCommandMessage,
+    DiagnosticErrorCode,
+    DSSIStatus,
+    EbsStatus,
+    MacroState,
+    Mission,
+    StateMachineStatusMessage,
+    VcuTelemetryMessage,
 )
 from StateMachine.constants import STATE_MACHINE_DEFAULT_DT_S
 from StateMachine.level1_state_machine import Level1StateMachine
-from StateMachine.state_machine_node import StateMachineNode
+
+
+class ScenarioFailed(RuntimeError):
+    """Raised when an automated scenario sees the wrong state. Unlike assert, survives python -O."""
+
+
+def _expect(condition: bool, message: str) -> None:
+    if not condition:
+        raise ScenarioFailed(message)
 
 
 class MockVcuSimulator:
     """Configurable simulation model of the FSAE Vehicle Control Unit."""
 
     def __init__(self, initial_time: float = 0.0) -> None:
-        self.time: float = initial_time
-        self.ebs_status: EbsStatus = EbsStatus.ARMED
-        self.ebs_sound_active: bool = False
-        self.dsms_status: bool = False
-        self.dbs_check_ok: bool = True
-        self.ts_status: bool = True
-        self.ami_mission: Mission = Mission.INSPECTION
-        self.brake_status: bool = True
-        self.sdc_status: bool = True
-        self.res_go_signal: bool = False
-        self.velocity: np.ndarray = np.zeros(3, dtype=np.float64)
+        self.time = initial_time
+        self.ebs_status = EbsStatus.ARMED
+        self.ebs_sound_active = False
+        self.dsms_status = False
+        self.dbs_check_ok = True
+        self.ts_status = True
+        self.ami_mission = Mission.INSPECTION
+        self.brake_status = True
+        self.sdc_status = True
+        self.res_go_signal = False
+        self.velocity = np.zeros(3, dtype=np.float64)
 
     def set_readiness_preconditions(self) -> None:
         """Set all physical preconditions required for AS_Off -> AS_Ready."""
         self.ebs_status = EbsStatus.ARMED
+        self.ebs_sound_active = False
         self.dsms_status = True
         self.dbs_check_ok = True
         self.ts_status = True
@@ -47,41 +64,6 @@ class MockVcuSimulator:
         self.sdc_status = True
         self.res_go_signal = False
         self.velocity.fill(0.0)
-
-    def toggle_dsms(self, state: Optional[bool] = None) -> bool:
-        """Toggle or set Driverless System Master Switch (DSMS)."""
-        self.dsms_status = (not self.dsms_status) if state is None else state
-        return self.dsms_status
-
-    def toggle_ebs(self, status: Optional[EbsStatus] = None) -> EbsStatus:
-        """Toggle or set Emergency Brake System (EBS) status."""
-        if status is not None:
-            self.ebs_status = status
-        else:
-            self.ebs_status = (
-                EbsStatus.ACTIVATED if self.ebs_status == EbsStatus.ARMED else EbsStatus.ARMED
-            )
-        return self.ebs_status
-
-    def trip_sdc(self) -> None:
-        """Open the Shutdown Circuit (SDC)."""
-        self.sdc_status = False
-
-    def close_sdc(self) -> None:
-        """Close/restore the Shutdown Circuit (SDC)."""
-        self.sdc_status = True
-
-    def press_res_go(self) -> None:
-        """Assert Remote Emergency System (RES) Go / Ready-to-Drive button."""
-        self.res_go_signal = True
-
-    def release_res_go(self) -> None:
-        """Release Remote Emergency System (RES) Go button."""
-        self.res_go_signal = False
-
-    def set_speed(self, vx: float) -> None:
-        """Set longitudinal vehicle velocity in m/s."""
-        self.velocity[0] = vx
 
     def step(self, dt: float = STATE_MACHINE_DEFAULT_DT_S) -> VcuTelemetryMessage:
         """Advance simulator time and return a fresh telemetry snapshot."""
@@ -112,367 +94,270 @@ class MockVcuNode(SourceNode):
         max_ticks: Optional[int] = None,
     ) -> None:
         super().__init__(name)
-        self.simulator: MockVcuSimulator = simulator or MockVcuSimulator()
-        self.dt: float = 1.0 / tick_rate_hz
-        self.max_ticks: Optional[int] = max_ticks
+        self.simulator = simulator or MockVcuSimulator()
+        self.dt = 1.0 / tick_rate_hz
+        self.max_ticks = max_ticks
 
     def produce(self) -> Generator[VcuTelemetryMessage, None, None]:
-        """Generator pumping simulated VCU telemetry packets downstream."""
         ticks = 0
         while not self.stopEvent.is_set():
             if self.max_ticks is not None and ticks >= self.max_ticks:
                 break
-            msg = self.simulator.step(self.dt)
-            yield msg
+            yield self.simulator.step(self.dt)
             ticks += 1
             time.sleep(self.dt)
 
 
 # ---------------------------------------------------------------------------
-# Pre-packaged Automated Scenarios
+# Automated scenarios
 # ---------------------------------------------------------------------------
 
-def run_normal_mission_scenario(verbose: bool = True) -> bool:
-    """Run full normal lifecycle: Off -> Ready (5s timer) -> Driving -> Finished -> Off."""
-    sm = Level1StateMachine()
-    vcu = MockVcuSimulator(initial_time=0.0)
-
-    if verbose:
-        print("[Scenario] 1. Initial State -> Expect AS_Off")
-    status, _ = sm.step(vcu.step())
-    assert status.current_state == MacroState.AS_OFF
-
-    if verbose:
-        print("[Scenario] 2. Activating Preconditions -> Expect AS_Ready")
-    vcu.set_readiness_preconditions()
-    status, _ = sm.step(vcu.step())
-    assert status.current_state == MacroState.AS_READY
-    assert status.dssi_status == DSSIStatus.CONTINUOUS_YELLOW
-
-    if verbose:
-        print("[Scenario] 3. Enforcing 5.0s lockout timer (stepping 5.1s)...")
-    for _ in range(255):  # 255 * 0.02s = 5.1s
+def _run_ticks(sm: Level1StateMachine, vcu: MockVcuSimulator, n: int) -> StateMachineStatusMessage:
+    status = None
+    for _ in range(n):
         status, _ = sm.step(vcu.step())
-        assert status.current_state == MacroState.AS_READY
+    return status
 
-    if verbose:
-        print("[Scenario] 4. Issuing valid RES Go signal -> Expect AS_Driving")
+
+def _ready_then_go(sm: Level1StateMachine, vcu: MockVcuSimulator, log: Callable[[str], None]) -> None:
+    """AS_Off -> AS_Ready -> (5.1 s) -> AS_Driving."""
+    vcu.set_readiness_preconditions()
+    status = _run_ticks(sm, vcu, 1)
+    _expect(status.current_state == MacroState.AS_READY, f"expected AS_READY, got {status.current_state.name}")
+    _expect(status.dssi_status == DSSIStatus.CONTINUOUS_YELLOW, "DSSI should be continuous yellow in AS_Ready")
+
+    log("Waiting out the 5.0 s AS_Ready lockout")
+    status = _run_ticks(sm, vcu, 255)
+    _expect(status.current_state == MacroState.AS_READY, "left AS_Ready during the lockout")
+
+    log("RES Go -> expect AS_Driving")
     vcu.res_go_signal = True
-    vcu.brake_status = False  # Brakes release for driving
-    status, _ = sm.step(vcu.step())
+    vcu.brake_status = False
+    status = _run_ticks(sm, vcu, 1)
     vcu.res_go_signal = False
-    assert status.current_state == MacroState.AS_DRIVING
-    assert status.dssi_status == DSSIStatus.FLASHING_YELLOW
+    _expect(status.current_state == MacroState.AS_DRIVING, f"expected AS_DRIVING, got {status.current_state.name}")
 
-    if verbose:
-        print("[Scenario] 5. Driving Inspection mission until completion...")
-    for _ in range(600):  # Run inspection steps
-        status, act = sm.step(vcu.step())
+
+def run_normal_mission_scenario(log: Callable[[str], None] = print) -> None:
+    """Off -> Ready (5 s timer) -> Driving (inspection) -> Finished -> Off."""
+    sm, vcu = Level1StateMachine(), MockVcuSimulator()
+    _ready_then_go(sm, vcu, log)
+
+    log("Running the inspection mission until AS_Finished")
+    for _ in range(600):
+        status, _ = sm.step(vcu.step())
         if status.current_state == MacroState.AS_FINISHED:
             break
+    _expect(status.current_state == MacroState.AS_FINISHED, f"expected AS_FINISHED, got {status.current_state.name}")
+    _expect(status.ebs_trigger_cmd, "EBS must be commanded in AS_Finished")
 
-    assert status.current_state == MacroState.AS_FINISHED
-    assert status.dssi_status == DSSIStatus.FLASHING_BLUE
-    assert status.ebs_trigger_cmd is True
-
-    if verbose:
-        print("[Scenario] 6. Powering down: DSMS Off & Brakes Released -> Expect AS_Off")
+    log("ASMS off & brakes released -> expect AS_Off")
     vcu.dsms_status = False
     vcu.brake_status = False
-    status, _ = sm.step(vcu.step())
-    assert status.current_state == MacroState.AS_OFF
-    if verbose:
-        print("[Scenario] SUCCESS: Normal mission sequence completed flawlessly.")
-    return True
+    status = _run_ticks(sm, vcu, 1)
+    _expect(status.current_state == MacroState.AS_OFF, f"expected AS_OFF, got {status.current_state.name}")
+    log("SUCCESS: normal mission")
 
 
-def run_premature_res_scenario(verbose: bool = True) -> bool:
-    """Verify rejection of premature RES Go press during 5.0s lockout."""
-    sm = Level1StateMachine()
-    vcu = MockVcuSimulator(initial_time=0.0)
-
+def run_premature_res_scenario(log: Callable[[str], None] = print) -> None:
+    """A RES Go press during the 5 s lockout must not launch the car later."""
+    sm, vcu = Level1StateMachine(), MockVcuSimulator()
     vcu.set_readiness_preconditions()
-    status, _ = sm.step(vcu.step())
-    assert status.current_state == MacroState.AS_READY
+    _run_ticks(sm, vcu, 101)
 
-    # Advance 2.0s into ready lockout
-    for _ in range(100):
-        sm.step(vcu.step())
-
-    if verbose:
-        print("[Scenario] Injecting premature RES Go press at t = 2.0s...")
+    log("Premature RES Go at t = 2.0 s")
     vcu.res_go_signal = True
-    status, _ = sm.step(vcu.step())
-    assert status.current_state == MacroState.AS_READY, "Car transitioned prematurely!"
+    status = _run_ticks(sm, vcu, 1)
     vcu.res_go_signal = False
+    _expect(status.current_state == MacroState.AS_READY, "car launched during the lockout")
 
-    if verbose:
-        print("[Scenario] Advancing to t = 5.5s without re-pressing RES Go...")
-    for _ in range(175):
-        status, _ = sm.step(vcu.step())
-        assert status.current_state == MacroState.AS_READY, "Car falsely remembered premature RES Go!"
+    log("Advancing to t = 5.5 s without pressing again")
+    status = _run_ticks(sm, vcu, 175)
+    _expect(status.current_state == MacroState.AS_READY, "car launched from a remembered premature press")
 
-    if verbose:
-        print("[Scenario] Pressing fresh RES Go at t = 5.6s -> Expect AS_Driving")
+    log("Fresh RES Go -> expect AS_Driving")
     vcu.res_go_signal = True
     vcu.brake_status = False
-    status, _ = sm.step(vcu.step())
-    assert status.current_state == MacroState.AS_DRIVING
-    if verbose:
-        print("[Scenario] SUCCESS: Premature RES Go correctly rejected.")
-    return True
+    status = _run_ticks(sm, vcu, 1)
+    _expect(status.current_state == MacroState.AS_DRIVING, f"expected AS_DRIVING, got {status.current_state.name}")
+    log("SUCCESS: premature RES Go rejected")
 
 
-def run_sdc_trip_scenario(verbose: bool = True) -> bool:
-    """Verify immediate emergency latching when SDC opens in AS_Driving."""
-    sm = Level1StateMachine()
-    vcu = MockVcuSimulator(initial_time=0.0)
+def run_sdc_trip_scenario(log: Callable[[str], None] = print) -> None:
+    """SDC opens in AS_Driving -> AS_Emergency, then the flowchart exit back to AS_Off."""
+    sm, vcu = Level1StateMachine(), MockVcuSimulator()
+    _ready_then_go(sm, vcu, log)
 
-    vcu.set_readiness_preconditions()
-    sm.step(vcu.step())
-
-    # Pass 5s timer
-    for _ in range(260):
-        sm.step(vcu.step())
-
-    # Launch driving
-    vcu.res_go_signal = True
-    status, _ = sm.step(vcu.step())
-    vcu.res_go_signal = False
-    assert status.current_state == MacroState.AS_DRIVING
-
-    if verbose:
-        print("[Scenario] Tripping Shutdown Circuit (SDC Open)...")
+    log("Opening the shutdown circuit")
     vcu.sdc_status = False
-    status, act = sm.step(vcu.step())
-    assert status.current_state == MacroState.AS_EMERGENCY
-    assert status.dssi_status == DSSIStatus.CONTINUOUS_BLUE
-    assert act.gated is False
-    assert status.ebs_trigger_cmd is True
-
-    if verbose:
-        print("[Scenario] Verifying emergency latches while the EBS sound is on...")
+    vcu.ebs_status = EbsStatus.ACTIVATED
     vcu.ebs_sound_active = True
+    status, act = sm.step(vcu.step())
+    _expect(status.current_state == MacroState.AS_EMERGENCY, f"expected AS_EMERGENCY, got {status.current_state.name}")
+    _expect(status.dssi_status == DSSIStatus.CONTINUOUS_BLUE, "DSSI should be continuous blue in AS_Emergency")
+    _expect(status.ebs_trigger_cmd and not act.gated, "EBS must be commanded and actuation gated off")
+
+    log("ASMS off & brakes released, EBS sound still on -> expect AS_Emergency")
     vcu.dsms_status = False
     vcu.brake_status = False
-    status, _ = sm.step(vcu.step())
-    assert status.current_state == MacroState.AS_EMERGENCY
+    status = _run_ticks(sm, vcu, 1)
+    _expect(status.current_state == MacroState.AS_EMERGENCY, "left AS_Emergency while the EBS sound was on")
 
-    if verbose:
-        print("[Scenario] EBS sound off & ASMS off & brakes released -> Expect AS_Off")
+    log("EBS sound off -> expect AS_Off")
     vcu.ebs_sound_active = False
-    status, _ = sm.step(vcu.step())
-    assert status.current_state == MacroState.AS_OFF
-    if verbose:
-        print("[Scenario] SUCCESS: SDC emergency trip and latching verified.")
-    return True
+    status = _run_ticks(sm, vcu, 1)
+    _expect(status.current_state == MacroState.AS_OFF, f"expected AS_OFF, got {status.current_state.name}")
+    log("SUCCESS: SDC trip and emergency exit")
 
 
-def run_watchdog_trip_scenario(verbose: bool = True) -> bool:
-    """Verify emergency trip when telemetry drops for > 200ms in AS_Ready."""
-    sm = Level1StateMachine()
-    vcu = MockVcuSimulator(initial_time=0.0)
-
+def run_watchdog_trip_scenario(log: Callable[[str], None] = print) -> None:
+    """A 300 ms telemetry gap in AS_Ready trips the VCU watchdog."""
+    sm, vcu = Level1StateMachine(), MockVcuSimulator()
     vcu.set_readiness_preconditions()
-    status, _ = sm.step(vcu.step())
-    assert status.current_state == MacroState.AS_READY
+    _run_ticks(sm, vcu, 1)
 
-    if verbose:
-        print("[Scenario] Injecting 300ms telemetry dropout (> 200ms watchdog)...")
-    dropped_tel = vcu.step(dt=0.30)
-    status, act = sm.step(dropped_tel)
+    log("Injecting a 300 ms telemetry dropout")
+    status, act = sm.step(vcu.step(dt=0.30))
+    _expect(status.current_state == MacroState.AS_EMERGENCY, f"expected AS_EMERGENCY, got {status.current_state.name}")
+    _expect(bool(status.error_code & DiagnosticErrorCode.WATCHDOG_TIMEOUT_VCU), "missing WATCHDOG_TIMEOUT_VCU")
+    _expect(status.ebs_trigger_cmd and not act.gated, "EBS must be commanded and actuation gated off")
+    log("SUCCESS: VCU watchdog")
 
-    assert status.current_state == MacroState.AS_EMERGENCY
-    assert status.error_code & 1 << 2  # DiagnosticErrorCode.WATCHDOG_TIMEOUT_VCU
-    assert act.gated is False
-    assert status.ebs_trigger_cmd is True
 
-    if verbose:
-        print("[Scenario] SUCCESS: VCU watchdog timeout trip verified.")
-    return True
+SCENARIOS = {
+    "normal": run_normal_mission_scenario,
+    "premature-res": run_premature_res_scenario,
+    "sdc-trip": run_sdc_trip_scenario,
+    "watchdog": run_watchdog_trip_scenario,
+}
 
 
 # ---------------------------------------------------------------------------
-# Interactive Terminal Mode
+# Interactive terminal mode
 # ---------------------------------------------------------------------------
+
+HELP_TEXT = """Commands (each one applies the change, then steps the state machine once):
+  ready                     - Apply all AS_Ready preconditions
+  dsms [on|off]             - Driverless System Master Switch (ASMS)
+  ebs [armed|act|unavail]   - EBS status (unavail + mission manual + ts on -> Manual Driving)
+  sound [on|off]            - EBS warning sound (AS_Emergency exits once it is off)
+  sdc [trip|close]          - Open or close the shutdown circuit
+  ts [on|off]               - Tractive system
+  dbs [ok|fail]             - DBS check result
+  go [press|rel]            - Press or release RES Go
+  brakes [on|off]           - Brake status
+  speed <vx>                - Longitudinal velocity in m/s
+  mission <name>            - AMI mission (manual, inspection, acceleration, skidpad, ...)
+  step [n]                  - Step n cycles without changing anything (default 1)
+  status                    - Step once and print
+  help                      - Show this help
+  quit / exit               - Leave the shell"""
+
+_OFF_WORDS = ("off", "0", "false", "rel", "release", "trip", "fail")
+
+
+def _is_on(args) -> bool:
+    """'cmd' or 'cmd on' -> True; 'cmd off' (or rel/trip/fail/0/false) -> False."""
+    return not (args and args[0].lower() in _OFF_WORDS)
+
 
 def run_interactive_mode(input_fn=input, output_fn=print) -> None:
-    """Run interactive terminal prompt allowing live toggling of VCU signals and stepping the state machine."""
-    sm = Level1StateMachine()
-    vcu = MockVcuSimulator(initial_time=0.0)
+    """Interactive prompt for toggling VCU signals and stepping the state machine."""
+    sm, vcu = Level1StateMachine(), MockVcuSimulator()
 
-    output_fn("================ Interactive Mock VCU Terminal ================")
-    output_fn("Commands:")
-    output_fn("  ready              - Apply all AS_Ready preconditions")
-    output_fn("  dsms [on|off]      - Toggle or set DSMS switch")
-    output_fn("  ebs [armed|act]    - Set EBS to ARMED or ACTIVATED")
-    output_fn("  sdc [trip|close]   - Trip (open) or close Shutdown Circuit")
-    output_fn("  go [press|rel]     - Press or release RES Go button")
-    output_fn("  brakes [on|off]    - Engage or release service brakes")
-    output_fn("  speed <vx>         - Set vehicle longitudinal velocity (m/s)")
-    output_fn("  mission <name>     - Set mission (inspection, accel, skidpad, etc.)")
-    output_fn("  step [n]           - Step state machine n cycles (default 1)")
-    output_fn("  sound [on|off]     - EBS warning sound (AS_Emergency exits once it is off)")
-    output_fn("  status             - Print current telemetry and state")
-    output_fn("  help               - Show this help menu")
-    output_fn("  quit / exit        - Exit interactive shell")
-    output_fn("===============================================================\n")
-
-    def print_status(status: StateMachineStatusMessage, act: ActuationCommandMessage) -> None:
-        err_str = f"0x{status.error_code:04X}" if status.error_code else "NONE"
+    def show(status: StateMachineStatusMessage, act: ActuationCommandMessage) -> None:
+        err = repr(DiagnosticErrorCode(status.error_code)) if status.error_code else "NONE"
         output_fn(
             f"[t={status.timestamp:.2f}s] State: {status.current_state.name} | "
-            f"DSSI: {status.dssi_status.name} | Error: {err_str} | "
-            f"Substate: {status.active_substate} | "
-            f"Act: (str={act.steering[0]:.2f}, thr={act.throttle[0]:.2f}, brk={act.braking[0]:.2f}, gated={act.gated})"
+            f"DSSI: {status.dssi_status.name} | Error: {err} | "
+            f"Mission: {status.active_mission.name} | Substate: {status.active_substate} | "
+            f"Act: (str={act.steering[0]:.2f}, thr={act.throttle[0]:.2f}, "
+            f"brk={act.braking[0]:.2f}, gated={act.gated})"
         )
 
-    # Initial step
-    status, act = sm.step(vcu.step())
-    print_status(status, act)
+    output_fn(HELP_TEXT)
+    show(*sm.step(vcu.step()))
 
     while True:
         try:
             line = input_fn("mock-vcu> ").strip()
         except (EOFError, KeyboardInterrupt):
             output_fn("\nExiting interactive shell.")
-            break
-
+            return
         if not line:
             continue
-
-        parts = line.split()
-        cmd = parts[0].lower()
-        cmd_args = parts[1:]
+        cmd, *args = line.split()
+        cmd = cmd.lower()
 
         if cmd in ("quit", "exit", "q"):
             output_fn("Exiting interactive shell.")
-            break
+            return
+        if cmd == "help":
+            output_fn(HELP_TEXT)
+            continue
+        if cmd == "step":
+            n = max(1, int(args[0])) if args and args[0].isdigit() else 1
+            for _ in range(n - 1):
+                sm.step(vcu.step())
+            show(*sm.step(vcu.step()))
+            output_fn(f"Stepped {n} cycles.")
+            continue
 
-        elif cmd == "help":
-            output_fn("Commands: ready, dsms [on|off], ebs [armed|act], sdc [trip|close], go [press|rel], brakes [on|off], speed <vx>, mission <name>, step [n], sound [on|off], status, quit")
-
-        elif cmd == "ready":
+        if cmd == "ready":
             vcu.set_readiness_preconditions()
             output_fn("Applied AS_Ready preconditions.")
-            status, act = sm.step(vcu.step())
-            print_status(status, act)
-
         elif cmd == "dsms":
-            if cmd_args:
-                val = cmd_args[0].lower() in ("1", "on", "true")
-                vcu.toggle_dsms(val)
-            else:
-                vcu.toggle_dsms()
-            output_fn(f"DSMS status: {vcu.dsms_status}")
-            status, act = sm.step(vcu.step())
-            print_status(status, act)
-
+            vcu.dsms_status = _is_on(args)
+            output_fn(f"DSMS: {vcu.dsms_status}")
         elif cmd == "ebs":
-            if cmd_args and cmd_args[0].lower() in ("act", "activated", "2"):
-                vcu.toggle_ebs(EbsStatus.ACTIVATED)
-            else:
-                vcu.toggle_ebs(EbsStatus.ARMED)
-            output_fn(f"EBS status: {vcu.ebs_status.name}")
-            status, act = sm.step(vcu.step())
-            print_status(status, act)
-
-        elif cmd == "sdc":
-            if cmd_args and cmd_args[0].lower() in ("close", "closed", "1", "true"):
-                vcu.close_sdc()
-            else:
-                vcu.trip_sdc()
-            output_fn(f"SDC status: {vcu.sdc_status}")
-            status, act = sm.step(vcu.step())
-            print_status(status, act)
-
-        elif cmd == "go":
-            if cmd_args and cmd_args[0].lower() in ("rel", "release", "0", "false"):
-                vcu.release_res_go()
-            else:
-                vcu.press_res_go()
-            output_fn(f"RES Go pressed: {vcu.res_go_signal}")
-            status, act = sm.step(vcu.step())
-            print_status(status, act)
-
-        elif cmd == "brakes":
-            if cmd_args and cmd_args[0].lower() in ("rel", "release", "off", "0", "false"):
-                vcu.brake_status = False
-            else:
-                vcu.brake_status = True
-            output_fn(f"Brake status: {vcu.brake_status}")
-            status, act = sm.step(vcu.step())
-            print_status(status, act)
-
-        elif cmd == "speed":
-            if cmd_args:
-                try:
-                    spd = float(cmd_args[0])
-                    vcu.set_speed(spd)
-                    output_fn(f"Longitudinal speed set to: {spd:.2f} m/s")
-                except ValueError:
-                    output_fn(f"Invalid speed: {cmd_args[0]}")
-            else:
-                output_fn(f"Current speed: {vcu.velocity[0]:.2f} m/s")
-            status, act = sm.step(vcu.step())
-            print_status(status, act)
-
-        elif cmd == "mission":
-            if cmd_args:
-                m_str = cmd_args[0].upper()
-                try:
-                    vcu.ami_mission = Mission[m_str]
-                    output_fn(f"Selected mission: {vcu.ami_mission.name}")
-                except KeyError:
-                    output_fn(f"Unknown mission '{cmd_args[0]}'. Choices: {[m.name for m in Mission]}")
-            else:
-                output_fn(f"Current mission: {vcu.ami_mission.name}")
-            status, act = sm.step(vcu.step())
-            print_status(status, act)
-
+            choice = args[0].lower() if args else "armed"
+            vcu.ebs_status = {"act": EbsStatus.ACTIVATED, "unavail": EbsStatus.UNAVAILABLE}.get(choice, EbsStatus.ARMED)
+            output_fn(f"EBS: {vcu.ebs_status.name}")
         elif cmd == "sound":
-            vcu.ebs_sound_active = not (cmd_args and cmd_args[0].lower() in ("off", "0", "false"))
+            vcu.ebs_sound_active = _is_on(args)
             output_fn(f"EBS sound active: {vcu.ebs_sound_active}")
-            status, act = sm.step(vcu.step())
-            print_status(status, act)
-
-        elif cmd == "step":
-            n = 1
-            if cmd_args:
-                try:
-                    n = max(1, int(cmd_args[0]))
-                except ValueError:
-                    n = 1
-            for _ in range(n):
-                status, act = sm.step(vcu.step())
-            output_fn(f"Stepped {n} cycles.")
-            print_status(status, act)
-
-        elif cmd == "status":
-            status, act = sm.step(vcu.step())
-            print_status(status, act)
-
-        else:
+        elif cmd == "sdc":
+            vcu.sdc_status = _is_on(args)  # "sdc trip" opens it, "sdc close" closes it
+            output_fn(f"SDC closed: {vcu.sdc_status}")
+        elif cmd == "ts":
+            vcu.ts_status = _is_on(args)
+            output_fn(f"TS active: {vcu.ts_status}")
+        elif cmd == "dbs":
+            vcu.dbs_check_ok = _is_on(args)
+            output_fn(f"DBS check ok: {vcu.dbs_check_ok}")
+        elif cmd == "go":
+            vcu.res_go_signal = _is_on(args)
+            output_fn(f"RES Go pressed: {vcu.res_go_signal}")
+        elif cmd == "brakes":
+            vcu.brake_status = _is_on(args)
+            output_fn(f"Brakes engaged: {vcu.brake_status}")
+        elif cmd == "speed":
+            try:
+                vcu.velocity[0] = float(args[0])
+                output_fn(f"Longitudinal speed set to: {vcu.velocity[0]:.2f} m/s")
+            except (IndexError, ValueError):
+                output_fn(f"Current speed: {vcu.velocity[0]:.2f} m/s (usage: speed <vx>)")
+        elif cmd == "mission":
+            try:
+                vcu.ami_mission = Mission[args[0].upper()]
+                output_fn(f"Selected mission: {vcu.ami_mission.name}")
+            except (IndexError, KeyError):
+                output_fn(f"Choices: {[m.name.lower() for m in Mission]}")
+        elif cmd != "status":
             output_fn(f"Unrecognized command: '{cmd}'. Type 'help' for available commands.")
+            continue
+
+        show(*sm.step(vcu.step()))
 
 
 # ---------------------------------------------------------------------------
-# CLI Entrypoint
+# CLI entry point
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Mock VCU Test Harness and Scenario Runner")
-    parser.add_argument(
-        "--scenario",
-        choices=["normal", "premature-res", "sdc-trip", "watchdog", "all"],
-        default="all",
-        help="Automated scenario to execute",
-    )
-    parser.add_argument(
-        "--interactive", "-i",
-        action="store_true",
-        help="Launch interactive terminal prompt to toggle VCU signals live",
-    )
+    parser = argparse.ArgumentParser(description="Mock VCU test harness and scenario runner")
+    parser.add_argument("--scenario", choices=[*SCENARIOS, "all"], default="all")
+    parser.add_argument("--interactive", "-i", action="store_true", help="Interactive shell to toggle VCU signals")
     args = parser.parse_args()
 
     if args.interactive:
@@ -480,15 +365,11 @@ def main() -> None:
         return
 
     print("=== FSAE Driverless Mock VCU Harness ===")
-    if args.scenario in ("normal", "all"):
-        run_normal_mission_scenario()
-    if args.scenario in ("premature-res", "all"):
-        run_premature_res_scenario()
-    if args.scenario in ("sdc-trip", "all"):
-        run_sdc_trip_scenario()
-    if args.scenario in ("watchdog", "all"):
-        run_watchdog_trip_scenario()
-    print("All requested Mock VCU scenarios passed successfully.")
+    for name, scenario in SCENARIOS.items():
+        if args.scenario in (name, "all"):
+            print(f"--- {name}")
+            scenario(lambda msg: print(f"[{name}] {msg}"))
+    print("All requested Mock VCU scenarios passed.")
 
 
 if __name__ == "__main__":

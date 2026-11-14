@@ -183,3 +183,31 @@ def test_mock_vcu_interactive_mode() -> None:
     assert any("Stepped 10 cycles" in out for out in outputs)
     assert any("Longitudinal speed set to: 5.00 m/s" in out for out in outputs)
     assert any("Exiting interactive shell" in out for out in outputs)
+
+
+def test_mock_vcu_interactive_reaches_manual_driving_and_emergency_exit() -> None:
+    """Every flowchart state is reachable from the shell, including Manual Driving and the emergency exit."""
+    from StateMachine.mock_vcu import run_interactive_mode
+
+    commands = iter([
+        "ebs unavail", "dsms off", "ts on", "mission manual",  # -> MANUAL_DRIVING
+        "ts off",                                              # -> AS_OFF
+        "ready", "sdc trip", "sound on",                       # AS_READY -> AS_EMERGENCY
+        "sdc close", "dsms off", "brakes off", "sound off",    # -> AS_OFF
+        "quit",
+    ])
+    outputs = []
+    run_interactive_mode(input_fn=lambda _prompt: next(commands), output_fn=outputs.append)
+
+    states = [line.split("State: ")[1].split(" |")[0] for line in outputs if "State: " in line]
+    assert "MANUAL_DRIVING" in states
+    i = states.index("AS_EMERGENCY")
+    assert states[i:-1].count("AS_EMERGENCY") == len(states[i:-1])  # latched until the sound goes off
+    assert states[-1] == "AS_OFF"
+
+
+def test_mock_vcu_scenarios_pass() -> None:
+    from StateMachine.mock_vcu import SCENARIOS
+
+    for scenario in SCENARIOS.values():
+        scenario(lambda _msg: None)
