@@ -211,3 +211,24 @@ def test_mock_vcu_scenarios_pass() -> None:
 
     for scenario in SCENARIOS.values():
         scenario(lambda _msg: None)
+
+
+def test_step_that_keeps_raising_still_trips_link_watchdog() -> None:
+    """A packet whose step() raises does not count as a live link."""
+    clock = FakeClock()
+    node = StateMachineNode(clock=clock)
+    node.process(make_ready_telemetry(timestamp=1.0))
+
+    def broken_step(*args, **kwargs):
+        raise RuntimeError("simulated state machine bug")
+
+    node.state_machine.step = broken_step
+
+    for i in range(1, 16):
+        clock.now += DT
+        try:
+            node.process(make_ready_telemetry(timestamp=1.0 + i * DT))
+        except RuntimeError:
+            pass  # the pipeline base class logs and skips these
+    status, _ = node.check_link()
+    assert status.current_state == MacroState.AS_EMERGENCY

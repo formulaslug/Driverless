@@ -55,13 +55,15 @@ class StateMachineNode(Node):
                 self._latest_level2_status = message
                 return None
             if isinstance(message, VcuTelemetryMessage):
-                self._last_rx_clock = self._clock()
-                self._last_rx_timestamp = message.timestamp
                 status, actuation = self.state_machine.step(
                     message,
                     external_actuation=self._latest_actuation,
                     external_status=self._latest_level2_status,
                 )
+                # Only a packet that produced outputs counts as a live link, so a
+                # step() that keeps raising still ends in a watchdog trip.
+                self._last_rx_clock = self._clock()
+                self._last_rx_timestamp = message.timestamp
                 return [status, actuation]
         return None
 
