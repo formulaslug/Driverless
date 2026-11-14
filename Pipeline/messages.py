@@ -62,7 +62,7 @@ class DiagnosticErrorCode(IntFlag):
 # State Machine & Vehicle Control Messages
 # ---------------------------------------------------------------------------
 
-@dataclass(kw_only=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class VcuTelemetryMessage:
     """Inbound telemetry packet from the Vehicle Control Unit (VCU) bridge.
 
@@ -82,15 +82,27 @@ class VcuTelemetryMessage:
     velocity: np.ndarray
 
     def __post_init__(self) -> None:
-        self.velocity = as_float_array(self.velocity)
+        object.__setattr__(self, "velocity", as_float_array(self.velocity))
 
 
 def as_float_array(value) -> np.ndarray:
-    """Canonical array form for numeric message fields: float64, at least 1-D."""
-    return np.atleast_1d(np.asarray(value, dtype=np.float64))
+    """Canonical array form for numeric message fields: a read-only float64 copy, at least 1-D."""
+    return as_readonly_array(value, np.float64)
 
 
-@dataclass
+def as_readonly_array(value, dtype) -> np.ndarray:
+    """Private, read-only, at-least-1-D copy of ``value``.
+
+    Frozen dataclasses only stop field reassignment; this also stops in-place
+    edits like ``msg.steering[0] = 1.0``. Copying first means the caller's own
+    array is never locked.
+    """
+    array = np.atleast_1d(np.array(value, dtype=dtype, copy=True))
+    array.flags.writeable = False
+    return array
+
+
+@dataclass(frozen=True, slots=True)
 class Level2StatusMessage:
     """Internal Level 2 behavioral sub-state and execution status."""
     timestamp: float
@@ -100,8 +112,11 @@ class Level2StatusMessage:
     fault_flags: np.ndarray = field(default_factory=lambda: np.zeros(16, dtype=bool))
     progress: float = 0.0
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "fault_flags", as_readonly_array(self.fault_flags, bool))
 
-@dataclass
+
+@dataclass(frozen=True, slots=True)
 class ActuationCommandMessage:
     """Outbound Level 3 low-level actuation commands."""
     timestamp: float
@@ -112,12 +127,12 @@ class ActuationCommandMessage:
 
     def __post_init__(self) -> None:
         # Accept floats, 0-D arrays or lists, but always store float64 arrays of ndim >= 1.
-        self.steering = as_float_array(self.steering)
-        self.throttle = as_float_array(self.throttle)
-        self.braking = as_float_array(self.braking)
+        object.__setattr__(self, "steering", as_float_array(self.steering))
+        object.__setattr__(self, "throttle", as_float_array(self.throttle))
+        object.__setattr__(self, "braking", as_float_array(self.braking))
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class StateMachineStatusMessage:
     """Outbound Level 1 state machine telemetry, diagnostics, and gate status."""
     timestamp: float
@@ -131,6 +146,9 @@ class StateMachineStatusMessage:
     active_mission: Mission
     active_substate: str
     ready_timer_elapsed: float
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "error_flags", as_readonly_array(self.error_flags, bool))
 
 
 # ---------------------------------------------------------------------------

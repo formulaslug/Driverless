@@ -1,5 +1,7 @@
 """Unit tests verifying safety watchdogs, fault trips, and emergency latching."""
 
+import dataclasses
+
 import pytest
 import numpy as np
 
@@ -25,7 +27,7 @@ def test_vcu_watchdog_timeout_trips_emergency(state_machine: Level1StateMachine)
     assert state_machine.current_state == MacroState.AS_READY
 
     # Next packet arrives at t = 1.3s (300ms gap > 200ms timeout)
-    tel.timestamp = 1.3
+    tel = dataclasses.replace(tel, timestamp=1.3)
     status, act = state_machine.step(tel)
 
     assert status.current_state == MacroState.AS_EMERGENCY
@@ -43,8 +45,7 @@ def test_sdc_open_trips_emergency(state_machine: Level1StateMachine) -> None:
     assert state_machine.current_state == MacroState.AS_READY
 
     # Trip SDC
-    tel.timestamp = 1.02
-    tel.sdc_status = False
+    tel = dataclasses.replace(tel, timestamp=1.02, sdc_status=False)
     status, _ = state_machine.step(tel)
 
     assert status.current_state == MacroState.AS_EMERGENCY
@@ -58,8 +59,7 @@ def test_unexpected_ebs_activation_trips_emergency(state_machine: Level1StateMac
     assert state_machine.current_state == MacroState.AS_READY
 
     # Trip EBS
-    tel.timestamp = 1.02
-    tel.ebs_status = EbsStatus.ACTIVATED
+    tel = dataclasses.replace(tel, timestamp=1.02, ebs_status=EbsStatus.ACTIVATED)
     status, _ = state_machine.step(tel)
 
     assert status.current_state == MacroState.AS_EMERGENCY
@@ -83,7 +83,7 @@ def test_dsms_drop_in_driving_trips_emergency(state_machine: Level1StateMachine)
     # Drop DSMS
     t += 0.02
     tel = make_ready_telemetry(timestamp=t)
-    tel.dsms_status = False
+    tel = dataclasses.replace(tel, dsms_status=False)
     status, _ = state_machine.step(tel)
 
     assert status.current_state == MacroState.AS_EMERGENCY

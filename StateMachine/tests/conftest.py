@@ -1,5 +1,6 @@
 """Shared fixtures and helper factories for State Machine unit tests."""
 
+import dataclasses
 from typing import Optional, Tuple
 
 import numpy as np
@@ -86,7 +87,7 @@ def drive_to_as_driving(
         sm.step(make_ready_telemetry(timestamp=t, mission=mission))
     t += DT
     if command is not None:
-        command.timestamp = t
+        command = dataclasses.replace(command, timestamp=t)
     sm.step(make_ready_telemetry(timestamp=t, res_go=True, mission=mission), external_actuation=command)
     assert sm.current_state == MacroState.AS_DRIVING
     return t

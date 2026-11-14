@@ -1,5 +1,7 @@
 """Unit tests verifying all Level 1 macro-state transitions and guards."""
 
+import dataclasses
+
 import pytest
 import numpy as np
 
@@ -95,8 +97,7 @@ def test_manual_driving_transition(state_machine: Level1StateMachine) -> None:
     assert status.dssi_status == DSSIStatus.OFF
 
     # When TS turns off, return to AS_Off
-    manual_tel.timestamp = 1.02
-    manual_tel.ts_status = False
+    manual_tel = dataclasses.replace(manual_tel, timestamp=1.02, ts_status=False)
     status, _ = state_machine.step(manual_tel)
     assert status.current_state == MacroState.AS_OFF
 
@@ -108,9 +109,7 @@ def test_transition_as_ready_to_as_off(state_machine: Level1StateMachine) -> Non
     assert status.current_state == MacroState.AS_READY
 
     # Turn DSMS off and release brakes at next cycle
-    tel.timestamp = 1.02
-    tel.dsms_status = False
-    tel.brake_status = False
+    tel = dataclasses.replace(tel, timestamp=1.02, dsms_status=False, brake_status=False)
     status, _ = state_machine.step(tel)
     assert status.current_state == MacroState.AS_OFF
     assert status.dssi_status == DSSIStatus.OFF

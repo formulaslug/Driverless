@@ -7,7 +7,7 @@ from typing import Optional
 from Pipeline.messages import VcuTelemetryMessage, ActuationCommandMessage
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class MissionContext:
     """Execution context passed to Level 2 sub-states every tick."""
     telemetry: VcuTelemetryMessage
@@ -16,7 +16,7 @@ class MissionContext:
     current_substate: str
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class SubStateResult:
     """Output emitted by a sub-state update."""
     next_substate: Optional[str] = None
