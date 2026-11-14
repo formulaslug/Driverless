@@ -16,6 +16,7 @@ from Pipeline.messages import (
 )
 from StateMachine.state_machine_node import StateMachineNode
 from StateMachine.mock_vcu import MockVcuNode, MockVcuSimulator
+from StateMachine.tests.conftest import make_telemetry
 
 
 class TelemetrySinkNode(Node):
@@ -97,7 +98,7 @@ def test_statemachine_node_drops_stale_external_actuation() -> None:
     assert node._latest_external_actuation is not None
 
     # Inbound telemetry at 1.3s (300ms later > 200ms timeout)
-    tel = VcuTelemetryMessage(timestamp=1.3, ebs_status=EbsStatus.ARMED)
+    tel = make_telemetry(timestamp=1.3)
     res = node.process(tel)
     assert res is not None
     # Stale actuation was cleared
@@ -152,30 +153,6 @@ def test_statemachine_node_concurrent_access() -> None:
     t2.join()
 
     assert len(errors) == 0
-
-
-def test_statemachine_node_request_reset() -> None:
-    """Verifies StateMachineNode delegates emergency reset thread-safely."""
-    from Pipeline.messages import DiagnosticErrorCode
-
-    node = StateMachineNode()
-    tel = VcuTelemetryMessage(timestamp=1.0, ebs_status=EbsStatus.ARMED, dsms_status=True)
-    node.process(tel)
-
-    node.state_machine.request_emergency_trip(DiagnosticErrorCode.SDC_OPEN, timestamp=1.02)
-    assert node.state_machine.current_state == MacroState.AS_EMERGENCY
-
-    # Reset with valid telemetry
-    valid_reset_tel = VcuTelemetryMessage(
-        timestamp=1.04,
-        ebs_status=EbsStatus.ARMED,
-        dsms_status=False,
-        brake_status=False,
-        sdc_status=True,
-    )
-    ok = node.request_reset(valid_reset_tel)
-    assert ok is True
-    assert node.state_machine.current_state == MacroState.AS_OFF
 
 
 def test_mock_vcu_interactive_mode() -> None:

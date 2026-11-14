@@ -56,6 +56,7 @@ def test_as_off_stays_in_off_if_any_precondition_missing(
     params = {
         "timestamp": 1.0,
         "ebs_status": EbsStatus.ARMED,
+        "ebs_sound_active": False,
         "dsms_status": True,
         "dbs_check_ok": True,
         "ts_status": True,
@@ -79,6 +80,7 @@ def test_manual_driving_transition(state_machine: Level1StateMachine) -> None:
     manual_tel = VcuTelemetryMessage(
         timestamp=1.0,
         ebs_status=EbsStatus.UNAVAILABLE,
+        ebs_sound_active=False,
         dsms_status=False,
         dbs_check_ok=True,
         ts_status=True,
@@ -154,6 +156,7 @@ def test_transition_as_finished_to_as_off(state_machine: Level1StateMachine) -> 
     exit_tel = VcuTelemetryMessage(
         timestamp=t,
         ebs_status=EbsStatus.ACTIVATED,
+        ebs_sound_active=False,
         dsms_status=False,
         dbs_check_ok=True,
         ts_status=False,
@@ -183,3 +186,9 @@ def test_state_transition_and_emergency_logging(state_machine: Level1StateMachin
         state_machine.request_emergency_trip(DiagnosticErrorCode.SDC_OPEN, timestamp=1.02)
         assert any("EMERGENCY TRIP LATCHED!" in record.message for record in caplog.records)
         assert any("SDC_OPEN" in record.message for record in caplog.records)
+
+
+def test_telemetry_safety_fields_are_required() -> None:
+    """A packet missing safety fields must fail to construct, not default to 'ready'."""
+    with pytest.raises(TypeError):
+        VcuTelemetryMessage(timestamp=0.0, ebs_status=EbsStatus.ARMED, dsms_status=True)

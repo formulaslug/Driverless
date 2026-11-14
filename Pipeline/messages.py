@@ -65,19 +65,24 @@ class DiagnosticErrorCode(IntFlag):
 # State Machine & Vehicle Control Messages
 # ---------------------------------------------------------------------------
 
-@dataclass
+@dataclass(kw_only=True)
 class VcuTelemetryMessage:
-    """Inbound telemetry packet from the Vehicle Control Unit (VCU) bridge."""
+    """Inbound telemetry packet from the Vehicle Control Unit (VCU) bridge.
+
+    Every safety input is required: a bridge that forgets a field must fail
+    loudly, never silently report "TS active, brakes engaged, SDC closed".
+    """
     timestamp: float
     ebs_status: EbsStatus
-    dsms_status: bool = False
-    dbs_check_ok: bool = True
-    ts_status: bool = True
-    ami_mission: Mission = Mission.INSPECTION
-    brake_status: bool = True
-    sdc_status: bool = True
-    res_go_signal: bool = False
-    velocity: np.ndarray = field(default_factory=lambda: np.zeros(3, dtype=np.float64))
+    ebs_sound_active: bool
+    dsms_status: bool
+    dbs_check_ok: bool
+    ts_status: bool
+    ami_mission: Mission
+    brake_status: bool
+    sdc_status: bool
+    res_go_signal: bool
+    velocity: np.ndarray
 
     def __post_init__(self) -> None:
         self.velocity = as_float_array(self.velocity)

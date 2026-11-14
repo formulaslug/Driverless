@@ -107,6 +107,7 @@ class Level1StateMachine:
         self._mission_start_time: float = 0.0
         self._last_vcu_telemetry_time: Optional[float] = None
         self._last_tick_time: Optional[float] = None
+        self._last_telemetry: Optional[VcuTelemetryMessage] = None
 
         # Lockout and button flags
         self._premature_res_detected: bool = False
@@ -179,68 +180,6 @@ class Level1StateMachine:
         """
         self._trip_emergency(fault, timestamp)
 
-    def can_reset(self, telemetry: VcuTelemetryMessage) -> bool:
-        """Checks whether telemetry satisfies all emergency reset preconditions.
-
-        Per the FSAE rules, leaving AS_EMERGENCY requires EBS sound off,
-        ASMS (DSMS) off, and brakes released. The acoustic warning buzzer is
-        managed directly by VCU firmware and silences after the mandated
-        countdown, so the CAN bridge expresses these conditions through the
-        telemetry fields checked below.
-
-        This method has no side effects; use request_reset() to perform the
-        reset.
-
-        Args:
-            telemetry: Latest VCU telemetry snapshot.
-
-        Returns:
-            True if the state machine is in AS_EMERGENCY and all of the
-            following hold: ebs_status is not ACTIVATED, dsms_status is
-            False, brake_status is False, and sdc_status is True. False
-            otherwise, including whenever the current state is not
-            AS_EMERGENCY.
-        """
-        return (
-            self._state == MacroState.AS_EMERGENCY
-            and telemetry.ebs_status != EbsStatus.ACTIVATED
-            and not telemetry.dsms_status
-            and not telemetry.brake_status
-            and telemetry.sdc_status
-        )
-
-    def request_reset(self, telemetry: VcuTelemetryMessage) -> bool:
-        """Attempts to clear the AS_EMERGENCY latch and return to AS_OFF.
-
-        On success, all latched faults are cleared and the AS_OFF entry
-        actions run (brake and EBS commands released, active sub-state name
-        cleared). On rejection, the state is unchanged and the reset-relevant
-        telemetry fields (EBS, DSMS, brake, SDC) are logged as a warning.
-
-        Args:
-            telemetry: Latest VCU telemetry snapshot. Its timestamp is used as
-                the AS_OFF entry time.
-
-        Returns:
-            True if the reset was accepted, False if any precondition checked
-            by can_reset() was not met.
-        """
-        if self.can_reset(telemetry):
-            logger.info("EMERGENCY RESET ACCEPTED at t=%.3fs: returning to AS_OFF", telemetry.timestamp)
-            self._error_code = DiagnosticErrorCode.NONE
-            self._set_state(MacroState.AS_OFF, telemetry, telemetry.timestamp)
-            return True
-
-        logger.warning(
-            "EMERGENCY RESET REJECTED at t=%.3fs [ebs=%s, dsms=%s, brake=%s, sdc=%s]",
-            telemetry.timestamp,
-            telemetry.ebs_status,
-            telemetry.dsms_status,
-            telemetry.brake_status,
-            telemetry.sdc_status,
-        )
-        return False
-
     # -----------------------------------------------------------------------
     # Main Step Cycle
     # -----------------------------------------------------------------------
@@ -295,6 +234,7 @@ class Level1StateMachine:
         now = telemetry.timestamp
         dt = (now - self._last_tick_time) if self._last_tick_time is not None else STATE_MACHINE_DEFAULT_DT_S
         self._last_tick_time = now
+        self._last_telemetry = telemetry
         self._heartbeat = (self._heartbeat + 1) & HEARTBEAT_MAX
 
         # Update standstill buffer
@@ -568,19 +508,15 @@ class Level1StateMachine:
         return None
 
     def _step_as_emergency(self, tel: VcuTelemetryMessage, now: float) -> Optional[ActuationCommandMessage]:
-        """Holds the AS_EMERGENCY latch.
-
-        No transition is evaluated here. The only exit is an accepted
-        request_reset().
-
-        Args:
-            tel: Latest VCU telemetry snapshot (unused).
-            now: Current time in seconds (unused).
-
-        Returns:
-            Always None. The EBS hold in AS_EMERGENCY is applied by
-            ActuationGatekeeper.
-        """
+        # flowchart.png: EBS Sound Off & ASMS off & Brakes Released -> AS_Off
+        if not tel.ebs_sound_active and not tel.dsms_status and not tel.brake_status:
+            logger.info(
+                "EMERGENCY CLEARED at t=%.3fs (faults were 0x%04X): returning to AS_OFF",
+                now,
+                self._error_code,
+            )
+            self._error_code = DiagnosticErrorCode.NONE
+            self._set_state(MacroState.AS_OFF, tel, now)
         return None
 
     def _step_manual_driving(self, tel: VcuTelemetryMessage, now: float) -> Optional[ActuationCommandMessage]:
@@ -641,7 +577,7 @@ class Level1StateMachine:
         if old_state == new_state:
             return
 
-        mission_name = tel.ami_mission.name if hasattr(tel.ami_mission, "name") else str(tel.ami_mission)
+        mission_name = tel.ami_mission.name if tel is not None else "UNKNOWN"
         logger.info(
             "STATE TRANSITION: %s -> %s [t=%.3fs, mission=%s, substate=%s]",
             old_state.name,
@@ -742,5 +678,4 @@ class Level1StateMachine:
             self._state.name,
             now,
         )
-        dummy_tel = VcuTelemetryMessage(timestamp=now, ebs_status=EbsStatus.ACTIVATED, dsms_status=False)
-        self._set_state(MacroState.AS_EMERGENCY, dummy_tel, now)
+        self._set_state(MacroState.AS_EMERGENCY, self._last_telemetry, now)

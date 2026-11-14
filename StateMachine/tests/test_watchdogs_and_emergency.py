@@ -15,7 +15,7 @@ from Pipeline.messages import (
 from StateMachine.level1_state_machine import Level1StateMachine
 from StateMachine.level2.base import MissionBehavior, MissionContext, SubStateResult
 from StateMachine.level2.registry import MissionRegistry
-from StateMachine.tests.conftest import make_ready_telemetry
+from StateMachine.tests.conftest import make_ready_telemetry, make_telemetry
 
 
 def test_vcu_watchdog_timeout_trips_emergency(state_machine: Level1StateMachine) -> None:
@@ -174,54 +174,37 @@ def test_injected_mission_behavior() -> None:
     assert status.active_substate == "CUSTOM_SUBSTATE"
 
 
-def test_emergency_latching_and_reset_guards(state_machine: Level1StateMachine) -> None:
-    """AS_Emergency latches and cannot be reset until exact safety reset criteria are met."""
-    tel = make_ready_telemetry(timestamp=1.0)
-    state_machine.step(tel)
+@pytest.mark.parametrize(
+    "blocking",
+    [
+        {"ebs_sound_active": True},
+        {"dsms_status": True},
+        {"brake_status": True},
+    ],
+)
+def test_emergency_holds_until_every_exit_condition(state_machine: Level1StateMachine, blocking: dict) -> None:
+    """flowchart.png: AS_Emergency stays latched while any of EBS sound / ASMS / brakes is still on."""
+    state_machine.step(make_ready_telemetry(timestamp=1.0))
     state_machine.request_emergency_trip(DiagnosticErrorCode.SDC_OPEN, timestamp=1.02)
-    assert state_machine.current_state == MacroState.AS_EMERGENCY
 
-    # Regular step in emergency keeps it in emergency
-    status, _ = state_machine.step(make_ready_telemetry(timestamp=1.04))
-    assert status.current_state == MacroState.AS_EMERGENCY
+    for i in range(50):
+        status, _ = state_machine.step(make_telemetry(timestamp=1.04 + i * 0.02, **blocking))
+        assert status.current_state == MacroState.AS_EMERGENCY
+    assert status.error_code & DiagnosticErrorCode.SDC_OPEN
 
-    # Attempt reset with DSMS on -> Must fail
-    tel_bad1 = make_ready_telemetry(timestamp=1.06)
-    tel_bad1.dsms_status = True
-    assert not state_machine.request_reset(tel_bad1)
-    assert state_machine.current_state == MacroState.AS_EMERGENCY
 
-    # Attempt reset with EBS activated -> Must fail
-    tel_bad2 = make_ready_telemetry(timestamp=1.08)
-    tel_bad2.dsms_status = False
-    tel_bad2.ebs_status = EbsStatus.ACTIVATED
-    assert not state_machine.request_reset(tel_bad2)
-    assert state_machine.current_state == MacroState.AS_EMERGENCY
+def test_emergency_exits_to_off_per_flowchart(state_machine: Level1StateMachine) -> None:
+    """flowchart.png: EBS Sound Off & ASMS off & Brakes Released -> AS_Off, clearing the fault code.
 
-    # Attempt reset with brakes engaged -> Must fail
-    tel_bad3 = make_ready_telemetry(timestamp=1.10)
-    tel_bad3.dsms_status = False
-    tel_bad3.brake_status = True
-    assert not state_machine.request_reset(tel_bad3)
-    assert state_machine.current_state == MacroState.AS_EMERGENCY
+    The SDC is still open here (normal right after an EBS trip); the flowchart does not require it closed.
+    """
+    state_machine.step(make_ready_telemetry(timestamp=1.0))
+    state_machine.request_emergency_trip(DiagnosticErrorCode.SDC_OPEN, timestamp=1.02)
 
-    # Valid reset: DSMS off, brakes released, EBS disarmed, SDC closed
-    tel_valid = VcuTelemetryMessage(
-        timestamp=1.12,
-        ebs_status=EbsStatus.ARMED,
-        dsms_status=False,
-        dbs_check_ok=True,
-        ts_status=False,
-        ami_mission=Mission.NOT_SELECTED,
-        brake_status=False,
-        sdc_status=True,
-        res_go_signal=False,
-        velocity=np.zeros(3, dtype=np.float64),
-    )
-    assert state_machine.can_reset(tel_valid)
-    assert state_machine.request_reset(tel_valid)
-    assert state_machine.current_state == MacroState.AS_OFF
-    assert state_machine.error_code == DiagnosticErrorCode.NONE
+    status, _ = state_machine.step(make_telemetry(timestamp=1.04, sdc_status=False, ebs_status=EbsStatus.ACTIVATED))
+    assert status.current_state == MacroState.AS_OFF
+    assert status.error_code == DiagnosticErrorCode.NONE
+    assert status.ebs_trigger_cmd is False
 
 
 def test_level2_external_planner_watchdog_timeout() -> None:

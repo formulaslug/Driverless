@@ -68,8 +68,3 @@ class StateMachineNode(Node):
             return [status_msg, gated_actuation]
 
         return None
-
-    def request_reset(self, telemetry: VcuTelemetryMessage) -> bool:
-        """Thread-safe request to reset emergency state."""
-        with self._lock:
-            return self.state_machine.request_reset(telemetry)

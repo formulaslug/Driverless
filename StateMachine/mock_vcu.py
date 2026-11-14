@@ -26,6 +26,7 @@ class MockVcuSimulator:
     def __init__(self, initial_time: float = 0.0) -> None:
         self.time: float = initial_time
         self.ebs_status: EbsStatus = EbsStatus.ARMED
+        self.ebs_sound_active: bool = False
         self.dsms_status: bool = False
         self.dbs_check_ok: bool = True
         self.ts_status: bool = True
@@ -88,6 +89,7 @@ class MockVcuSimulator:
         return VcuTelemetryMessage(
             timestamp=self.time,
             ebs_status=self.ebs_status,
+            ebs_sound_active=self.ebs_sound_active,
             dsms_status=self.dsms_status,
             dbs_check_ok=self.dbs_check_ok,
             ts_status=self.ts_status,
@@ -249,20 +251,18 @@ def run_sdc_trip_scenario(verbose: bool = True) -> bool:
     assert status.ebs_trigger_cmd is True
 
     if verbose:
-        print("[Scenario] Verifying emergency latching (cannot reset while DSMS is on)...")
-    reset_ok = sm.request_reset(vcu.step())
-    assert not reset_ok
-    assert sm.current_state == MacroState.AS_EMERGENCY
-
-    if verbose:
-        print("[Scenario] Clearing faults and resetting...")
-    vcu.sdc_status = True
+        print("[Scenario] Verifying emergency latches while the EBS sound is on...")
+    vcu.ebs_sound_active = True
     vcu.dsms_status = False
     vcu.brake_status = False
-    vcu.ebs_status = EbsStatus.ARMED
-    reset_ok = sm.request_reset(vcu.step())
-    assert reset_ok
-    assert sm.current_state == MacroState.AS_OFF
+    status, _ = sm.step(vcu.step())
+    assert status.current_state == MacroState.AS_EMERGENCY
+
+    if verbose:
+        print("[Scenario] EBS sound off & ASMS off & brakes released -> Expect AS_Off")
+    vcu.ebs_sound_active = False
+    status, _ = sm.step(vcu.step())
+    assert status.current_state == MacroState.AS_OFF
     if verbose:
         print("[Scenario] SUCCESS: SDC emergency trip and latching verified.")
     return True
@@ -312,7 +312,7 @@ def run_interactive_mode(input_fn=input, output_fn=print) -> None:
     output_fn("  speed <vx>         - Set vehicle longitudinal velocity (m/s)")
     output_fn("  mission <name>     - Set mission (inspection, accel, skidpad, etc.)")
     output_fn("  step [n]           - Step state machine n cycles (default 1)")
-    output_fn("  reset              - Attempt emergency reset")
+    output_fn("  sound [on|off]     - EBS warning sound (AS_Emergency exits once it is off)")
     output_fn("  status             - Print current telemetry and state")
     output_fn("  help               - Show this help menu")
     output_fn("  quit / exit        - Exit interactive shell")
@@ -350,7 +350,7 @@ def run_interactive_mode(input_fn=input, output_fn=print) -> None:
             break
 
         elif cmd == "help":
-            output_fn("Commands: ready, dsms [on|off], ebs [armed|act], sdc [trip|close], go [press|rel], brakes [on|off], speed <vx>, mission <name>, step [n], reset, status, quit")
+            output_fn("Commands: ready, dsms [on|off], ebs [armed|act], sdc [trip|close], go [press|rel], brakes [on|off], speed <vx>, mission <name>, step [n], sound [on|off], status, quit")
 
         elif cmd == "ready":
             vcu.set_readiness_preconditions()
@@ -430,9 +430,9 @@ def run_interactive_mode(input_fn=input, output_fn=print) -> None:
             status, act = sm.step(vcu.step())
             print_status(status, act)
 
-        elif cmd == "reset":
-            ok = sm.request_reset(vcu.step())
-            output_fn(f"Emergency reset result: {ok} (current state: {sm.current_state.name})")
+        elif cmd == "sound":
+            vcu.ebs_sound_active = not (cmd_args and cmd_args[0].lower() in ("off", "0", "false"))
+            output_fn(f"EBS sound active: {vcu.ebs_sound_active}")
             status, act = sm.step(vcu.step())
             print_status(status, act)
 

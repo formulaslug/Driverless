@@ -1,5 +1,7 @@
 """Unit tests for Level 2 Inspection Mission and sub-state behavior."""
 
+import dataclasses
+
 import pytest
 import numpy as np
 
@@ -7,6 +9,7 @@ from Pipeline.messages import Mission, VcuTelemetryMessage, EbsStatus
 from StateMachine.level2.base import MissionContext
 from StateMachine.level2.registry import MissionRegistry
 from StateMachine.level2.missions.inspection import InspectionMission, InspectionSubState
+from StateMachine.tests.conftest import make_telemetry
 
 
 def test_inspection_mission_registry() -> None:
@@ -26,6 +29,7 @@ def test_inspection_mission_lifecycle_and_substates() -> None:
             telemetry=VcuTelemetryMessage(
                 timestamp=time_now,
                 ebs_status=EbsStatus.ARMED,
+                ebs_sound_active=False,
                 dsms_status=True,
                 dbs_check_ok=True,
                 ts_status=True,
@@ -78,7 +82,7 @@ def test_inspection_mission_lifecycle_and_substates() -> None:
 def test_inspection_accepts_0d_velocity() -> None:
     """A 0-D velocity is normalized by the message, so CONTROLLED_STOP can read velocity[0]."""
     mission = InspectionMission()
-    tel = VcuTelemetryMessage(timestamp=0.0, ebs_status=EbsStatus.ARMED, velocity=np.float64(0.0))
+    tel = dataclasses.replace(make_telemetry(), velocity=np.float64(0.0))
     assert tel.velocity.shape == (1,)
     mission.on_enter(MissionContext(telemetry=tel, dt=0.0, mission_time=0.0, current_substate="INIT"))
     for t in (4.0, 8.0, 8.6):
