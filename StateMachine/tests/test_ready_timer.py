@@ -2,7 +2,7 @@
 
 import pytest
 
-from Pipeline.messages import MacroState, DSSIStatus
+from Pipeline.messages import DSSIStatus, EbsStatus, MacroState
 from StateMachine.level1_state_machine import Level1StateMachine
 from StateMachine.tests.conftest import make_ready_telemetry
 
@@ -105,3 +105,22 @@ def test_valid_fresh_res_go_at_five_seconds(state_machine: Level1StateMachine) -
     t += 0.02
     status, _ = state_machine.step(make_ready_telemetry(timestamp=t, res_go=True))
     assert status.current_state == MacroState.AS_DRIVING
+
+
+@pytest.mark.parametrize(
+    "patch",
+    [
+        {"ebs_status": EbsStatus.UNAVAILABLE},
+        {"ts_status": False},
+        {"dbs_check_ok": False},
+    ],
+)
+def test_res_go_rejected_if_launch_preconditions_drop(state_machine: Level1StateMachine, patch: dict) -> None:
+    """A fresh RES Go after 5 s does not launch if EBS, TS or the DBS check is no longer good."""
+    t = 0.0
+    state_machine.step(make_ready_telemetry(timestamp=t))
+    for _ in range(260):
+        t += 0.02
+        state_machine.step(make_ready_telemetry(timestamp=t))
+    status, _ = state_machine.step(make_ready_telemetry(timestamp=t + 0.02, res_go=True, **patch))
+    assert status.current_state == MacroState.AS_READY
