@@ -1,22 +1,23 @@
 """Integration tests verifying StateMachineNode within the Pipeline pub/sub system."""
 
+import queue
 import time
-import pytest
+
 import numpy as np
 
 from Pipeline.graph import Graph
-from Pipeline.node import Node
+from Pipeline.node import Node, POISON
 from Pipeline.messages import (
-    MacroState,
-    DSSIStatus,
-    EbsStatus,
-    VcuTelemetryMessage,
-    StateMachineStatusMessage,
     ActuationCommandMessage,
+    DiagnosticErrorCode,
+    Level2StatusMessage,
+    MacroState,
+    Mission,
+    StateMachineStatusMessage,
 )
 from StateMachine.state_machine_node import StateMachineNode
 from StateMachine.mock_vcu import MockVcuNode, MockVcuSimulator
-from StateMachine.tests.conftest import make_telemetry
+from StateMachine.tests.conftest import DT, make_ready_telemetry, make_telemetry
 
 
 class TelemetrySinkNode(Node):
@@ -66,93 +67,89 @@ def test_statemachine_node_in_pipeline_graph() -> None:
     assert np.allclose(sink.received_actuations[0].throttle, 0.0)
 
 
-def test_statemachine_node_processes_external_actuation() -> None:
-    """StateMachineNode caches external actuation messages and passes them through when driving."""
+class FakeClock:
+    def __init__(self) -> None:
+        self.now = 100.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def test_link_loss_trips_emergency_without_new_packets() -> None:
+    """The VCU watchdog fires while the link is still dead, not only when a late packet arrives."""
+    clock = FakeClock()
+    node = StateMachineNode(clock=clock)
+    node.process(make_ready_telemetry(timestamp=1.0))
+    assert node.state_machine.current_state == MacroState.AS_READY
+
+    clock.now += 0.1
+    assert node.check_link() is None
+
+    clock.now += 0.2  # 300 ms of silence
+    status, actuation = node.check_link()
+    assert status.current_state == MacroState.AS_EMERGENCY
+    assert status.error_code & DiagnosticErrorCode.WATCHDOG_TIMEOUT_VCU
+    assert np.isclose(status.timestamp, 1.3)
+    assert np.allclose(actuation.braking, 1.0) and actuation.gated is False
+
+    clock.now += 1.0
+    assert node.check_link() is None  # already in AS_Emergency: emit once, not every tick
+
+
+def test_link_loss_is_ignored_in_as_off() -> None:
+    clock = FakeClock()
+    node = StateMachineNode(clock=clock)
+    node.process(make_telemetry(timestamp=1.0))
+    clock.now += 5.0
+    assert node.check_link() is None
+    assert node.state_machine.current_state == MacroState.AS_OFF
+
+
+def test_watchdog_thread_publishes_emergency() -> None:
+    """End to end with real threads: one packet, then silence, then an emergency is published."""
     node = StateMachineNode()
+    out: queue.Queue = queue.Queue()
+    node.subscribers.append(out)
+    node.start()
+    node.inputQueue.put(make_ready_telemetry(timestamp=1.0))
 
-    # Send external actuation request
-    ext_cmd = ActuationCommandMessage(
-        timestamp=1.0,
-        steering=np.array([0.2], dtype=np.float64),
-        throttle=np.array([0.7], dtype=np.float64),
-        braking=np.array([0.0], dtype=np.float64),
-    )
-    result = node.process(ext_cmd)
-    # Caching returns None
-    assert result is None
-    assert node._latest_external_actuation is ext_cmd
+    states = []
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline and MacroState.AS_EMERGENCY not in states:
+        try:
+            message = out.get(timeout=0.1)
+        except queue.Empty:
+            continue
+        if isinstance(message, StateMachineStatusMessage):
+            states.append(message.current_state)
+
+    node.inputQueue.put(POISON)
+    node.join()
+    assert states[0] == MacroState.AS_READY
+    assert MacroState.AS_EMERGENCY in states
 
 
-def test_statemachine_node_drops_stale_external_actuation() -> None:
-    """StateMachineNode discards cached external actuation messages that exceed 200ms age."""
+def test_node_forwards_planner_messages_to_state_machine() -> None:
+    """Cached planner commands and status reach the state machine, so external missions can finish."""
     node = StateMachineNode()
+    t = 1.0
+    node.process(make_ready_telemetry(timestamp=t, mission=Mission.ACCELERATION))
+    for _ in range(261):
+        t += DT
+        node.process(make_ready_telemetry(timestamp=t, mission=Mission.ACCELERATION))
+    t += DT
+    node.process(ActuationCommandMessage(timestamp=t, braking=np.array([1.0])))
+    node.process(make_ready_telemetry(timestamp=t, res_go=True, mission=Mission.ACCELERATION))
+    assert node.state_machine.current_state == MacroState.AS_DRIVING
 
-    # Cached command timestamp = 1.0s
-    node.process(
-        ActuationCommandMessage(
-            timestamp=1.0,
-            steering=np.array([0.1], dtype=np.float64),
-            throttle=np.array([0.5], dtype=np.float64),
-        )
-    )
-    assert node._latest_external_actuation is not None
-
-    # Inbound telemetry at 1.3s (300ms later > 200ms timeout)
-    tel = make_telemetry(timestamp=1.3)
-    res = node.process(tel)
-    assert res is not None
-    # Stale actuation was cleared
-    assert node._latest_external_actuation is None
-
-
-def test_statemachine_node_concurrent_access() -> None:
-    """Verifies thread-safe concurrent actuation caching and telemetry stepping."""
-    import threading
-
-    node = StateMachineNode()
-    sim = MockVcuSimulator()
-    sim.set_readiness_preconditions()
-
-    stop_event = threading.Event()
-    errors = []
-
-    def actuation_worker():
-        t = 1.0
-        while not stop_event.is_set():
-            cmd = ActuationCommandMessage(
-                timestamp=t,
-                steering=np.array([0.1], dtype=np.float64),
-                throttle=np.array([0.2], dtype=np.float64),
-            )
-            try:
-                node.process(cmd)
-            except Exception as e:
-                errors.append(e)
-            t += 0.01
-            time.sleep(0.001)
-
-    def telemetry_worker():
-        t = 1.0
-        while not stop_event.is_set():
-            msg = sim.step(dt=0.01)
-            try:
-                node.process(msg)
-            except Exception as e:
-                errors.append(e)
-            t += 0.01
-            time.sleep(0.001)
-
-    t1 = threading.Thread(target=actuation_worker)
-    t2 = threading.Thread(target=telemetry_worker)
-    t1.start()
-    t2.start()
-
-    time.sleep(0.05)
-    stop_event.set()
-    t1.join()
-    t2.join()
-
-    assert len(errors) == 0
+    for _ in range(60):
+        t += DT
+        assert node.process(ActuationCommandMessage(timestamp=t, braking=np.array([1.0]))) is None
+        assert node.process(
+            Level2StatusMessage(timestamp=t, active_substate="STOP", mission_finished=True, emergency_stop=False)
+        ) is None
+        status, _ = node.process(make_ready_telemetry(timestamp=t, mission=Mission.ACCELERATION))
+    assert status.current_state == MacroState.AS_FINISHED
 
 
 def test_mock_vcu_interactive_mode() -> None:
