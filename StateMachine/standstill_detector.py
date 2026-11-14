@@ -12,7 +12,7 @@ from StateMachine.constants import (
 
 class StandstillDetector:
     """Tracks vehicle longitudinal velocity history in a circular ring buffer.
-    
+
     Verifies that the vehicle has remained continuously within the standstill
     deadband (|v_x| < threshold) for at least a specified time duration.
     Operates in O(1) time per push without periodic memory reallocations.

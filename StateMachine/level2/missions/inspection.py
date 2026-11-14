@@ -18,7 +18,7 @@ class InspectionSubState(str, Enum):
 
 class InspectionMission(MissionBehavior):
     """Minimal baseline MVP inspection mission.
-    
+
     Generates a deterministic, open-loop actuator validation profile:
     1. STEERING_SWEEP: Sinusoidal steering sweep at standstill.
     2. POWERTRAIN_RAMP: Low-speed throttle ramp and hold.

@@ -14,7 +14,7 @@ class MissionRegistry:
     @classmethod
     def register(cls, mission: Mission, behavior_cls: Type[MissionBehavior]) -> None:
         """Register a mission implementation class.
-        
+
         Args:
             mission: The Mission enum key.
             behavior_cls: Concrete subclass of MissionBehavior.
@@ -24,10 +24,10 @@ class MissionRegistry:
     @classmethod
     def create(cls, mission: Mission) -> Optional[MissionBehavior]:
         """Instantiate a mission behavior for the given mission.
-        
+
         Args:
             mission: The Mission enum key.
-            
+
         Returns:
             An instantiated MissionBehavior, or None if not registered.
         """

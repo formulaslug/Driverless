@@ -8,17 +8,18 @@ from StateMachine.constants import (
     STANDSTILL_VELOCITY_THRESHOLD_MPS,
     STANDSTILL_MIN_DURATION_S,
     STANDSTILL_BUFFER_CAPACITY,
+    FINISH_STANDSTILL_TIMEOUT_S,
     VCU_WATCHDOG_TIMEOUT_S,
     LEVEL2_WATCHDOG_TIMEOUT_S,
 )
-from StateMachine.standstill_detector import StandstillDetector  # noqa: E402
-from StateMachine.gatekeeper import gate_command  # noqa: E402
-from StateMachine.level1_state_machine import (  # noqa: E402
+from StateMachine.standstill_detector import StandstillDetector
+from StateMachine.gatekeeper import gate_command
+from StateMachine.level1_state_machine import (
     Level1StateMachine,
     unpack_diagnostic_flags,
     VALID_DRIVERLESS_MISSIONS,
 )
-from StateMachine.level2 import (  # noqa: E402
+from StateMachine.level2 import (
     MissionBehavior,
     MissionContext,
     SubStateResult,
@@ -37,6 +38,7 @@ __all__ = [
     "STANDSTILL_VELOCITY_THRESHOLD_MPS",
     "STANDSTILL_MIN_DURATION_S",
     "STANDSTILL_BUFFER_CAPACITY",
+    "FINISH_STANDSTILL_TIMEOUT_S",
     "VCU_WATCHDOG_TIMEOUT_S",
     "LEVEL2_WATCHDOG_TIMEOUT_S",
     "StandstillDetector",
