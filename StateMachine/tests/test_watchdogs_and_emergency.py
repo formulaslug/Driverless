@@ -198,7 +198,9 @@ def test_emergency_exits_to_off_per_flowchart(state_machine: Level1StateMachine)
     The SDC is still open here (normal right after an EBS trip); the flowchart does not require it closed.
     """
     state_machine.step(make_ready_telemetry(timestamp=1.0))
-    state_machine.request_emergency_trip(DiagnosticErrorCode.SDC_OPEN, timestamp=1.02)
+    tripped = make_ready_telemetry(timestamp=1.02, sdc_status=False)
+    status, _ = state_machine.step(tripped)
+    assert status.current_state == MacroState.AS_EMERGENCY
 
     status, _ = state_machine.step(make_telemetry(timestamp=1.04, sdc_status=False, ebs_status=EbsStatus.ACTIVATED))
     assert status.current_state == MacroState.AS_OFF
@@ -270,3 +272,24 @@ def test_level2_on_enter_exception_trips_emergency() -> None:
     status, _ = sm.step(make_ready_telemetry(timestamp=t + 0.02, res_go=True))
     assert status.current_state == MacroState.AS_EMERGENCY
     assert status.error_code == DiagnosticErrorCode.LEVEL2_EXCEPTION
+
+
+def test_emergency_is_published_before_it_can_clear() -> None:
+    """A trip must reach the VCU at least once, even if the late packet already meets the exit conditions."""
+    sm = Level1StateMachine()
+    t = drive_to_as_driving(sm)
+    late_packet = make_telemetry(timestamp=t + 0.3)  # ASMS off, brakes released, sound off
+    status, act = sm.step(late_packet)
+    assert status.current_state == MacroState.AS_EMERGENCY
+    assert status.error_code & DiagnosticErrorCode.WATCHDOG_TIMEOUT_VCU
+    assert status.ebs_trigger_cmd is True and np.allclose(act.braking, 1.0)
+
+
+def test_external_trip_is_reported_before_it_can_clear(state_machine: Level1StateMachine) -> None:
+    """request_emergency_trip() between ticks: the next packet reports AS_EMERGENCY instead of clearing it."""
+    state_machine.step(make_ready_telemetry(timestamp=1.0))
+    state_machine.request_emergency_trip(DiagnosticErrorCode.SDC_OPEN, timestamp=1.01)
+    status, _ = state_machine.step(make_telemetry(timestamp=1.02))
+    assert status.current_state == MacroState.AS_EMERGENCY
+    status, _ = state_machine.step(make_telemetry(timestamp=1.04))
+    assert status.current_state == MacroState.AS_OFF

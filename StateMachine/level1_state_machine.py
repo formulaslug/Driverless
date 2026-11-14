@@ -141,6 +141,8 @@ class Level1StateMachine:
         self._mission_start_time = 0.0
         self._finish_requested_time: Optional[float] = None
         self._premature_res_detected = False
+        # False from a trip until an output reporting AS_EMERGENCY has been built.
+        self._emergency_reported = True
 
         self._last_tick_time: Optional[float] = None
         self._last_telemetry: Optional[VcuTelemetryMessage] = None
@@ -433,6 +435,9 @@ class Level1StateMachine:
             tel: Latest VCU telemetry packet.
             now: Current telemetry timestamp.
         """
+        # Never clear an emergency the VCU has not been told about yet.
+        if not self._emergency_reported:
+            return
         if not tel.ebs_sound_active and not tel.dsms_status and not tel.brake_status:
             logger.info("EMERGENCY CLEARED at t=%.3fs (faults were %r)", now, self._error_code)
             self._set_state(MacroState.AS_OFF, now)
@@ -607,6 +612,7 @@ class Level1StateMachine:
             self._substate,
             now,
         )
+        self._emergency_reported = False
         self._set_state(MacroState.AS_EMERGENCY, now)
 
     def _outputs(self, now: float, raw_cmd: Optional[ActuationCommandMessage]) -> Outputs:
@@ -620,6 +626,8 @@ class Level1StateMachine:
             A (StateMachineStatusMessage, ActuationCommandMessage) pair.
         """
         self._heartbeat = (self._heartbeat + 1) & HEARTBEAT_MAX
+        if self._state == MacroState.AS_EMERGENCY:
+            self._emergency_reported = True
         status = StateMachineStatusMessage(
             timestamp=now,
             current_state=self._state,
