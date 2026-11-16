@@ -1,21 +1,21 @@
-import numpy as np
-import matplotlib.pyplot as plt
+from pathlib import Path
 import sys
-import os
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from lateral.lateral import Lateral
-from longitudinal.pid import PID
 
-from config import K_DD, WHEELBASE, MIN_LOOKAHEAD
+ROOT_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT_DIR))
+
+import matplotlib
+import matplotlib.pyplot as plt
+import numpy as np
+
+from config import M, MAX_TORQUE, R_WHEEL, STEERING_RATIO, T_GEARBOX, WHEELBASE
+from controller import Controller
+from longitudinal.gain_scheduler import Gains
 
 # Initial PID Gains
 K_P = 0.5
 K_I = 0.1
 K_D = 0.01
-
-# actuator model
-A_MAX = 3.0        # max acceleration at throttle_output = 1
-A_BRAKE_MAX = 0.0  # max deceleration at brake_output = 0
 
 # Simulation settings
 DT = 0.02
@@ -51,19 +51,8 @@ def make_tight_curve(length=60.0, amplitude=5.0, wavelength=30.0, spacing=0.5):
     return list(zip(xs, ys))
 
 
-# Actuator conversions
-def accel_to_throttle_brake(a_des):
-    if a_des >= 0:
-        throttle = np.clip(a_des / A_MAX, 0, 1)
-        brake = 0.0
-    else:
-        throttle = 0.0
-        brake = 0.0
-    return throttle, brake
-
-
-def throttle_brake_to_accel(throttle, brake):
-    return throttle * A_MAX - brake * A_BRAKE_MAX
+def throttle_to_accel(throttle):
+    return throttle * MAX_TORQUE * T_GEARBOX / (R_WHEEL * M)
 
 
 def step_bicycle_model(x, y, yaw, v, delta, a, dt, wheelbase):
@@ -81,8 +70,7 @@ def step_bicycle_model(x, y, yaw, v, delta, a, dt, wheelbase):
 # Main simulation loop
 
 def run_sim(waypoints):
-    lateral = Lateral(K_dd=K_DD, min_lookahead=MIN_LOOKAHEAD, wheelbase=WHEELBASE)
-    longitudinal = PID(K_p=K_P, K_i=K_I, K_d=K_D)
+    controller = Controller(gains=Gains(K_P, K_I, K_D))
 
     x, y, yaw, v = X0, Y0, YAW0, V0
     t = 0.0
@@ -92,11 +80,11 @@ def run_sim(waypoints):
     goal_x, goal_y = waypoints[-1]
 
     while t < MAX_TIME:
-        delta = lateral.update(waypoints, x, y, yaw, v)
-        a_des = longitudinal.update_des_accel(v, V_DESIRED, t)
-
-        throttle, brake = accel_to_throttle_brake(a_des)
-        a = throttle_brake_to_accel(throttle, brake)
+        throttle, steering_angle = controller.update(
+            x=x, y=y, yaw=yaw, v=v, t=t, v_desired=V_DESIRED, waypoints=waypoints
+        )
+        a = throttle_to_accel(throttle)
+        delta = np.radians(steering_angle / STEERING_RATIO)
 
         x, y, yaw, v = step_bicycle_model(x, y, yaw, v, delta, a, DT, WHEELBASE)
         t += DT
@@ -153,7 +141,10 @@ def plot_results(result):
     axes[2].grid(True)
 
     plt.tight_layout()
-    plt.show()
+    if matplotlib.get_backend().lower() == "agg":
+        plt.close(fig)
+    else:
+        plt.show()
 
 
 if __name__ == "__main__":
