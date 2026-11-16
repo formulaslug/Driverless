@@ -2,7 +2,7 @@
 
 import threading
 import time
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Union
 
 from Pipeline.node import Node
 from Pipeline.messages import (
@@ -15,15 +15,39 @@ from StateMachine.level1_state_machine import Level1StateMachine
 
 
 class StateMachineNode(Node):
-    """Pipeline node running the Level 1 state machine.
+    """Pipeline node that runs the Level 1 state machine.
 
-    Inputs:  VcuTelemetryMessage (each one runs a state machine cycle),
-             ActuationCommandMessage and Level2StatusMessage from an external planner
-             (cached; the state machine decides whether they are fresh enough).
-    Outputs: [StateMachineStatusMessage, gated ActuationCommandMessage] per cycle.
+    Each VcuTelemetryMessage runs one state machine cycle. Actuation commands
+    and Level 2 status messages from an external planner are cached, and the
+    state machine decides on each cycle whether they are fresh enough to use.
+    A watchdog thread also emits outputs if telemetry stops arriving entirely,
+    because process() is never called then and no packet-gap check can run.
 
-    A watchdog thread also emits those outputs if telemetry stops arriving
-    entirely, because then process() is never called and no packet-gap check can run.
+    Typical usage example:
+
+        node = StateMachineNode()
+        node.start()
+
+    Inputs:
+        VcuTelemetryMessage: Runs one state machine cycle.
+        ActuationCommandMessage: Cached from an external planner.
+        Level2StatusMessage: Cached from an external planner.
+
+    Outputs:
+        A [StateMachineStatusMessage, ActuationCommandMessage] pair per cycle.
+        The actuation command is gated by the state machine and always safe to
+        send to the VCU.
+
+    Args:
+        name: Node name, also used to name the watchdog thread.
+        queueSize: Maximum number of queued input messages.
+        state_machine: Level1StateMachine to drive. If None, a new one is
+            created.
+        clock: Monotonic clock in seconds used to time the VCU link. Tests can
+            inject a fake clock.
+
+    Attributes:
+        state_machine: The Level1StateMachine driven by this node.
     """
 
     def __init__(
@@ -38,7 +62,7 @@ class StateMachineNode(Node):
         self._clock = clock
         # One lock guards the state machine and everything below: the pipeline
         # thread and the watchdog thread both drive the state machine.
-        self._lock = threading.Lock()
+        self._lock: threading.Lock = threading.Lock()
         self._latest_actuation: Optional[ActuationCommandMessage] = None
         self._latest_level2_status: Optional[Level2StatusMessage] = None
         self._last_rx_clock: Optional[float] = None
@@ -46,7 +70,24 @@ class StateMachineNode(Node):
         self._watchdog_stop = threading.Event()
         self._watchdog = threading.Thread(target=self._watchdog_loop, name=f"{name}-watchdog", daemon=True)
 
-    def process(self, message) -> Optional[List]:
+    def process(self, message: Union[VcuTelemetryMessage,
+                                     ActuationCommandMessage,
+                                     Level2StatusMessage]) -> Optional[List]:
+        """Handles one incoming pipeline message.
+
+        Planner messages are only cached. A telemetry packet runs one state
+        machine cycle and counts as a live VCU link, but only after step()
+        returns.
+
+        Args:
+            message: Incoming message. ActuationCommandMessage and
+                Level2StatusMessage come from an external planner and are
+                cached for the next cycle. VcuTelemetryMessage runs a cycle.
+
+        Returns:
+            A [StateMachineStatusMessage, ActuationCommandMessage] pair for a
+            telemetry message, or None for a cached or ignored message.
+        """
         with self._lock:
             if isinstance(message, ActuationCommandMessage):
                 self._latest_actuation = message
@@ -68,9 +109,14 @@ class StateMachineNode(Node):
         return None
 
     def check_link(self) -> Optional[List]:
-        """Trip the VCU watchdog if no telemetry arrived for VCU_WATCHDOG_TIMEOUT_S.
+        """Trips the VCU watchdog if telemetry has been silent too long.
 
-        Returns the outputs to emit, or None. Called by the watchdog thread every tick.
+        Called periodically by the watchdog thread. Does nothing until the
+        first telemetry packet arrives.
+
+        Returns:
+            The (status, actuation) outputs to emit if the watchdog tripped,
+            otherwise None.
         """
         with self._lock:
             if self._last_rx_clock is None:
@@ -83,14 +129,21 @@ class StateMachineNode(Node):
         return list(outputs) if outputs is not None else None
 
     def _watchdog_loop(self) -> None:
+        """Runs check_link() every tick and emits any outputs until shutdown."""
         while not self._watchdog_stop.wait(STATE_MACHINE_DEFAULT_DT_S):
             self._emitResult(self.check_link())
 
     def start(self) -> None:
+        """Starts the node and its VCU watchdog thread."""
         super().start()
         self._watchdog.start()
 
     def onShutdown(self):
+        """Stops the watchdog thread and waits for it to exit.
+
+        Returns:
+            None, so no final outputs are emitted.
+        """
         self._watchdog_stop.set()
         if self._watchdog.is_alive():
             self._watchdog.join()
