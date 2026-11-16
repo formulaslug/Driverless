@@ -11,11 +11,29 @@ from StateMachine.constants import (
 
 
 class StandstillDetector:
-    """Tracks vehicle longitudinal velocity history in a circular ring buffer.
+    """Tracks longitudinal velocity history in a circular ring buffer.
 
-    Verifies that the vehicle has remained continuously within the standstill
-    deadband (|v_x| < threshold) for at least a specified time duration.
-    Operates in O(1) time per push without periodic memory reallocations.
+    Checks that the vehicle has stayed within the standstill deadband
+    (|v_x| < threshold) for at least a given duration. Each push is O(1) and
+    never reallocates memory.
+
+    Typical usage example:
+
+        detector = StandstillDetector()
+        detector.push(timestamp=t, velocity=v_x)
+        if detector.is_standstill():
+            ...
+
+    Args:
+        capacity: Maximum number of samples to keep. Once full, the oldest
+            sample is overwritten.
+
+    Attributes:
+        capacity: Maximum number of buffered samples.
+        sample_count: Number of valid samples currently buffered.
+
+    Raises:
+        ValueError: If capacity is not strictly positive.
     """
 
     def __init__(self, capacity: int = STANDSTILL_BUFFER_CAPACITY) -> None:
@@ -28,7 +46,13 @@ class StandstillDetector:
         self._head: int = 0
 
     def push(self, timestamp: float, velocity: Union[float, np.ndarray]) -> None:
-        """Append a velocity observation in O(1) time using circular indexing."""
+        """Appends a velocity sample, overwriting the oldest one when full.
+
+        Args:
+            timestamp: Sample time in seconds.
+            velocity: Longitudinal velocity v_x in m/s. If an array is given,
+                only its first element is used.
+        """
         v_arr = np.atleast_1d(velocity)
         v_x = float(v_arr[0])
 
@@ -40,7 +64,13 @@ class StandstillDetector:
             self._count += 1
 
     def get_window(self) -> np.ndarray:
-        """Return chronological history of valid buffered samples."""
+        """Returns the buffered samples in chronological order.
+
+        Returns:
+            A copy of the samples as an (N, 2) array, oldest first, with
+            columns [timestamp, v_x]. Empty with shape (0, 2) if nothing is
+            buffered.
+        """
         if self._count == 0:
             return np.empty((0, 2), dtype=np.float64)
 
@@ -55,7 +85,23 @@ class StandstillDetector:
         required_duration_s: float = STANDSTILL_MIN_DURATION_S,
         threshold_mps: float = STANDSTILL_VELOCITY_THRESHOLD_MPS,
     ) -> bool:
-        """Return True if vehicle has continuously satisfied standstill criteria."""
+        """Checks whether the vehicle has been at standstill long enough.
+
+        The samples in the last required_duration_s must span at least 90% of
+        that duration, which allows for small gaps between samples, and every
+        one must satisfy |v_x| < threshold_mps.
+
+        Args:
+            required_duration_s: Time in seconds the vehicle must stay at
+                standstill.
+            threshold_mps: Speed in m/s below which the vehicle counts as
+                stationary.
+
+        Returns:
+            True if the standstill criteria have been met continuously for
+            the required duration, otherwise False. Always False with fewer
+            than two samples.
+        """
         if self._count < 2:
             return False
 
@@ -77,12 +123,12 @@ class StandstillDetector:
         return bool(np.all(np.abs(recent[:, 1]) < threshold_mps))
 
     def reset(self) -> None:
-        """Clear all buffered observations."""
+        """Clears all buffered samples."""
         self._buffer.fill(0.0)
         self._count = 0
         self._head = 0
 
     @property
     def sample_count(self) -> int:
-        """Number of valid samples currently buffered."""
+        """The number of valid samples currently buffered."""
         return self._count
