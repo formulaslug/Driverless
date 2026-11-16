@@ -37,6 +37,17 @@ _HOLD_BRAKE = {
 
 
 def _stop_command(timestamp: float, shape: Tuple[int, ...], braking: float) -> ActuationCommandMessage:
+    """Builds a command with zero steering and throttle and the given brake.
+
+    Args:
+        timestamp: Current telemetry timestamp.
+        shape: Shape shared by the steering, throttle and braking arrays.
+        braking: Normalized brake command applied to every element.
+
+    Returns:
+        An ActuationCommandMessage with gated=False, since the command was
+        generated here rather than passed through from a planner.
+    """
     return ActuationCommandMessage(
         timestamp=timestamp,
         steering=np.full(shape, STEERING_ZERO_RAD),
@@ -47,6 +58,15 @@ def _stop_command(timestamp: float, shape: Tuple[int, ...], braking: float) -> A
 
 
 def _is_valid(cmd: ActuationCommandMessage) -> bool:
+    """Checks that a command is safe to clamp and pass through.
+
+    Args:
+        cmd: Actuation command requested by the planner.
+
+    Returns:
+        True if the steering, throttle and braking arrays all have the same
+        shape and contain only finite values, otherwise False.
+    """
     arrays = (cmd.steering, cmd.throttle, cmd.braking)
     same_shape = cmd.steering.shape == cmd.throttle.shape == cmd.braking.shape
     return same_shape and all(np.isfinite(a).all() for a in arrays)
@@ -57,7 +77,23 @@ def gate_command(
     requested_command: Optional[ActuationCommandMessage],
     timestamp: float,
 ) -> ActuationCommandMessage:
-    """Return the actuation command that is safe to send to the VCU in ``state``."""
+    """Returns the actuation command that is safe to send to the VCU.
+
+    In DS_DRIVING, a valid command is clamped to physical limits and passed
+    through. A missing or invalid one is replaced by a service-brake stop. In
+    every other state the requested command is ignored: steering and throttle
+    are zero and the brake is set by the state.
+
+    Args:
+        state: Current macro-state.
+        requested_command: Command requested by the planner, or None if there
+            is none.
+        timestamp: Current telemetry timestamp.
+
+    Returns:
+        An ActuationCommandMessage with gated=True if the requested command
+        was passed through, otherwise gated=False.
+    """
     shape = requested_command.steering.shape if requested_command is not None else (1,)
 
     if state != MacroState.DS_DRIVING or requested_command is None:
