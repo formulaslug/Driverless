@@ -1,22 +1,22 @@
 from dataclasses import dataclass
 import numpy as np
-from gain_scheduler import Gains, GainScheduler
-from config import MAX_ACCEL, MAX_BRAKE
+from longitudinal.gain_scheduler import Gains, GainScheduler
+from config import MAX_ACCEL, MIN_ACCEL
 
 class PID:
 
-    def __init__(self, K_p, K_i=0.0, K_d=0.0, K_aw=0.0):
+    def __init__(self, kp, ki=0.0, kd=0.0):
         self.t_prev : float = 0.0
         self.v : float = 0.0
         self.v_prev : float = 0.0
         self.a_des_prev : float = 0.0
         self.error_prev : float = 0.0
         self.net_integral : float = 0.0
-        self.intialized : bool = False
+        self.initialized : bool = False
 
         # Initialize GainScheduler with a Gains object
-        intial_gains = Gains(K_p, K_i, K_d, K_aw)
-        self.gains = GainScheduler(intial_gains, t=0.0)
+        initial_gains = Gains(kp, ki, kd)
+        self.gains = GainScheduler(initial_gains, t=0.0)
 
         # Variables used to determine rise time
         self.t_10 : float = None
@@ -60,32 +60,33 @@ class PID:
         else:
             self.settle_time = None
 
-    def update_des_accel(self, v, v_desired, t, sm_in=0):
+    def update_des_accel(self, v, v_desired, t, sm_in=None):
         """
         PID longitudinal algorithm, updating state variables, and desired accel
         """
-	    # Compute feedback error
+        # Compute feedback error
         error = v_desired - v
-        if not self.intialized:
+        if not self.initialized:
             dt = 0.01
             self.v_prev = v
-            self.intialized = True
+            self.initialized = True
         elif t - self.t_prev < 0.001:
             return self.a_des_prev
         else:
             dt = t - self.t_prev
 
         # Update gains via GainScheduler before computing PID
-        self.gains.gain_schedule(sm_in, t=t)
+        if sm_in is not None:
+            self.gains.gain_schedule(sm_in, t=t)
 
-        P = error * self.gains.our_gains.KP
-        D = -(v - self.v_prev) / dt * self.gains.our_gains.KD # prevent deritive kick
+        P = error * self.gains.gains.KP
+        D = -(v - self.v_prev) / dt * self.gains.gains.KD # prevent deritive kick
 
         # Integral Clamp
-        I_check = self.gains.our_gains.KI * (self.net_integral + error * dt)
+        I_check = self.gains.gains.KI * (self.net_integral + error * dt)
         check_output = P + I_check + D
         max_output = MAX_ACCEL
-        min_output = MAX_BRAKE
+        min_output = MIN_ACCEL
 
         saturated_high = check_output >= max_output and error > 0
         saturated_low = check_output <= min_output and error < 0
@@ -93,7 +94,7 @@ class PID:
         if not (saturated_high or saturated_low):
             self.net_integral += error * dt
 
-        I = self.gains.our_gains.KI * self.net_integral
+        I = self.gains.gains.KI * self.net_integral
 
         # PID raw output
         a_des = P + I + D
@@ -104,8 +105,8 @@ class PID:
             self.find_rise_time(t=t, v=v, v_desired=v_desired)
 
         # Find Settle Time
-        self.v_upper_bound = v_desired * 1.01
-        self.v_lower_bound = v_desired * 0.99
+        self.v_upper_bound = v_desired + .22
+        self.v_lower_bound = v_desired - .22
         self.find_settle_time(v=v, t=t)
 
         # Find overshoot

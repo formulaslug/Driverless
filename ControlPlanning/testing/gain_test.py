@@ -5,10 +5,10 @@ import longitudinal.gain_scheduler as gs
 
 def manual_sim():
     # myGains = gs.Gains(0.0, 0.0, 0.0, 0.0)
-    myGains = gs.Gains(5.0, 5.0, 5.0, 5.0)
-    target =  gs.Gains(1.0, 1.0, 1.0, 1.0)
+    myGains = gs.Gains(5.0, 5.0, 5.0)
+    target =  gs.Gains(1.0, 1.0, 1.0)
 
-    scheduler = gs.GainScheduler(myGains, 0, 0)
+    scheduler = gs.GainScheduler(myGains, 0)
     scheduler.start_gain_change(target, 0.0, 5.0)
 
     scheduler.change_gains(0.5)
@@ -56,7 +56,7 @@ def manual_sim():
     scheduler.print_gains()
 
 def simple_transition():
-    myGains = gs.Gains(5.0, 5.0, 5.0, 5.0)
+    myGains = gs.Gains(5.0, 5.0, 5.0)
     # target =  gs.Gains(1.0, 1.0, 1.0, 1.0)
     t = 0
     scheduler = gs.GainScheduler(myGains, t)
@@ -68,15 +68,14 @@ def simple_transition():
         scheduler.print_gains()
         t += 0.333
 
-    assert scheduler.our_gains.KP == 0.0
-    assert scheduler.our_gains.KI == 0.0
-    assert scheduler.our_gains.KD == 0.0
-    assert scheduler.our_gains.KAW == 0.0
+    assert scheduler.gains.KP == 0.0
+    assert scheduler.gains.KI == 0.0
+    assert scheduler.gains.KD == 0.0
 
     print("Gain transition test passed!")
 
 def change_gains_in_middle_01():
-    myGains = gs.Gains(5.0, 5.0, 5.0, 5.0)
+    myGains = gs.Gains(5.0, 5.0, 5.0)
     t = 0
     scheduler = gs.GainScheduler(myGains, t)
 
@@ -91,15 +90,14 @@ def change_gains_in_middle_01():
 
         scheduler.print_gains()
         t += 0.01
-    assert scheduler.our_gains.KP == 10.0
-    assert scheduler.our_gains.KI == 10.0
-    assert scheduler.our_gains.KD == 10.0
-    assert scheduler.our_gains.KAW == 10.0
+    assert scheduler.gains.KP == 10.0
+    assert scheduler.gains.KI == 10.0
+    assert scheduler.gains.KD == 10.0
 
     print("Gain transition test passed!")
 
 def change_gains_in_middle_02():
-    myGains = gs.Gains(5.0, 5.0, 5.0, 5.0)
+    myGains = gs.Gains(5.0, 5.0, 5.0)
     t = 0
     scheduler = gs.GainScheduler(myGains, t)
 
@@ -116,16 +114,15 @@ def change_gains_in_middle_02():
         t += 0.01
 
     
-    assert scheduler.our_gains.KP == 0.0
-    assert scheduler.our_gains.KI == 0.0
-    assert scheduler.our_gains.KD == 0.0
-    assert scheduler.our_gains.KAW == 0.0
+    assert scheduler.gains.KP == 0.0
+    assert scheduler.gains.KI == 0.0
+    assert scheduler.gains.KD == 0.0
 
     print("Gain transition test passed!")
 
 
 def change_gains_in_middle_03():
-    myGains = gs.Gains(5.0, 5.0, 5.0, 5.0)
+    myGains = gs.Gains(5.0, 5.0, 5.0)
     t = 0
     scheduler = gs.GainScheduler(myGains, t)
 
@@ -142,10 +139,9 @@ def change_gains_in_middle_03():
         t += 0.01
 
     
-    assert scheduler.our_gains.KP == 1.5
-    assert scheduler.our_gains.KI == 7.6
-    assert scheduler.our_gains.KD == 4.9
-    assert scheduler.our_gains.KAW == 0.15
+    assert scheduler.gains.KP == 1.5
+    assert scheduler.gains.KI == 7.6
+    assert scheduler.gains.KD == 4.9
 
     print("Gain transition test passed!")
 

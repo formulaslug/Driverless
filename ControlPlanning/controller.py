@@ -1,7 +1,8 @@
 from longitudinal.longitudinal import Longitudinal
 from lateral.lateral import Lateral
 from steering_control import SteeringControl
-from config import K_DD, MIN_LOOKAHEAD, WHEELBASE
+from throttle_control import ThrottleControl
+from longitudinal.gain_scheduler import Gains
 """
 INPUTS:
 - Waypoints in smooth_path
@@ -13,12 +14,15 @@ OUTPUTS:
 """
 
 class Controller:
-    def __init__(self, K_p = 0.5, K_i = 0.1, K_d = 0.01, K_dd = K_DD, min_lookahead = MIN_LOOKAHEAD, wheelbase = WHEELBASE): 
-        self.longitudinal = Longitudinal(K_p = K_p, K_i = K_i, K_d = K_d)
-        self.lateral = Lateral(K_dd = K_dd, min_lookahead = min_lookahead, wheelbase = wheelbase)
+    def __init__(self, gains=Gains(2.5, 0.6, 0.05)): 
+        self.longitudinal = Longitudinal(gains)
+        self.lateral = Lateral()
         self.steering_control = SteeringControl()
+        self.throttle_control = ThrottleControl()
 
     def update(self, x, y, yaw, v, t, v_desired, waypoints):
         a_des = self.longitudinal.update_des_accel(v, v_desired, t)
-        curvature = self.lateral.pure_pursuit.update_curvature(waypoints, x, y, yaw, v)
-        return a_des, curvature
+        delta = self.lateral.update(waypoints, x, y, yaw, v)
+        throttle = self.throttle_control.calc_output(a_des)
+        steering_angle = self.steering_control.delta_to_actuator(delta)
+        return throttle, steering_angle

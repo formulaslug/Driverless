@@ -27,7 +27,7 @@ class PurePursuit():
         else:
             return 2 * np.sin(alpha) / l_d
 
-    def update_curvature(self, waypoints, x, y, yaw, v):
+    def update_delta(self, waypoints, x, y, yaw, v):
         """
         pure pursuit algorithm, uses lookahead point from set of waypoinys which dist scales with velocity,
         and returns a steering angle in radians(delta)
@@ -58,6 +58,6 @@ class PurePursuit():
         alpha = np.arctan2(lookahead_vector[1], lookahead_vector[0]) - (yaw)
         k = self.get_curve(alpha=alpha, l_d=l_d)
 
-        #delta = np.arctan(k * self.wheelbase)
+        delta = np.arctan(k * self.wheelbase)
 
-        return k
+        return delta
