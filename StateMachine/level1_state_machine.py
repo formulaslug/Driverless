@@ -3,18 +3,18 @@
 Every transition below maps to an arrow in flowchart.png unless marked
 "(safety extension)". Keep it that way: when the diagram changes, change both.
 
-    DS_Off       -> DS_Ready        EBS armed & ASMS on & DBS ok & TS on & mission & brakes engaged
-    DS_Off       -> Manual_Driving  manual mission & EBS unavailable & ASMS off & TS on
+    DS_Off       -> DS_Ready        EBS armed & DSMS on & DBS ok & TS on & mission & brakes engaged
+    DS_Off       -> Manual_Driving  manual mission & EBS unavailable & DSMS off & TS on
     Manual       -> DS_Off          TS off
-    DS_Ready     -> DS_Off          ASMS off & brakes released
+    DS_Ready     -> DS_Off          DSMS off & brakes released
     DS_Ready     -> DS_Driving      RES Go (fresh press) & 5 s passed
     DS_Ready     -> DS_Emergency    EBS activated (safety extension: also SDC open, VCU link lost)
     DS_Driving   -> DS_Finished     mission finished & velocity = 0
-    DS_Driving   -> DS_Emergency    EBS activated (safety extension: SDC open, ASMS/TS drop,
+    DS_Driving   -> DS_Emergency    EBS activated (safety extension: SDC open, DSMS/TS drop,
                                     VCU or Level 2 link lost, Level 2 crash or e-stop,
                                     no standstill after mission finished)
-    DS_Finished  -> DS_Off          ASMS off & brakes released
-    DS_Emergency -> DS_Off          EBS sound off & ASMS off & brakes released
+    DS_Finished  -> DS_Off          DSMS off & brakes released
+    DS_Emergency -> DS_Off          EBS sound off & DSMS off & brakes released
 """
 
 import logging
@@ -314,12 +314,12 @@ class Level1StateMachine:
         Checks run in priority order:
 
             1. Faults: an open SDC or an activated EBS trips DS_EMERGENCY.
-            2. Clean exit: ASMS off with brakes released returns to DS_OFF.
+            2. Clean exit: DSMS off with brakes released returns to DS_OFF.
             3. Lockout: RES Go is ignored for DS_READY_LOCKOUT_DURATION_S, and
                a press during the lockout is remembered as premature.
             4. Premature press: it must be released before a new press counts,
                so holding RES Go through the lockout cannot start the mission.
-            5. Start: a fresh press enters DS_DRIVING if EBS is armed and ASMS,
+            5. Start: a fresh press enters DS_DRIVING if EBS is armed and DSMS,
                TS and the DBS check are still good.
 
         Args:
@@ -419,7 +419,7 @@ class Level1StateMachine:
         return result.actuation_command
 
     def _step_ds_finished(self, tel: VcuTelemetryMessage, now: float) -> None:
-        """Returns to DS_OFF once ASMS is off and the brakes are released.
+        """Returns to DS_OFF once DSMS is off and the brakes are released.
 
         Args:
             tel: Latest VCU telemetry packet.
@@ -429,7 +429,7 @@ class Level1StateMachine:
             self._set_state(MacroState.DS_OFF, now)
 
     def _step_ds_emergency(self, tel: VcuTelemetryMessage, now: float) -> None:
-        """Returns to DS_OFF once EBS sound, ASMS and brakes are all off.
+        """Returns to DS_OFF once EBS sound, DSMS and brakes are all off.
 
         Args:
             tel: Latest VCU telemetry packet.

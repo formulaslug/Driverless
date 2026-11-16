@@ -103,7 +103,7 @@ def test_finished_but_never_stops_trips_standstill_timeout() -> None:
 
 
 def test_status_reports_committed_mission_not_selector() -> None:
-    """Changing the AMI selector mid-run does not change what the status says is running."""
+    """Changing the DMI selector mid-run does not change what the status says is running."""
     sm = Level1StateMachine()
     t = drive_to_ds_driving(sm, Mission.INSPECTION)
     status, _ = sm.step(make_ready_telemetry(timestamp=t + DT, mission=Mission.SKIDPAD))

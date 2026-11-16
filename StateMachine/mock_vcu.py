@@ -151,7 +151,7 @@ def run_normal_mission_scenario(log: Callable[[str], None] = print) -> None:
     _expect(status.current_state == MacroState.DS_FINISHED, f"expected DS_FINISHED, got {status.current_state.name}")
     _expect(status.ebs_trigger_cmd, "EBS must be commanded in DS_Finished")
 
-    log("ASMS off & brakes released -> expect DS_Off")
+    log("DSMS off & brakes released -> expect DS_Off")
     vcu.dsms_status = False
     vcu.brake_status = False
     status = _run_ticks(sm, vcu, 1)
@@ -197,7 +197,7 @@ def run_sdc_trip_scenario(log: Callable[[str], None] = print) -> None:
     _expect(status.dssi_status == DSSIStatus.CONTINUOUS_BLUE, "DSSI should be continuous blue in DS_Emergency")
     _expect(status.ebs_trigger_cmd and not act.gated, "EBS must be commanded and actuation gated off")
 
-    log("ASMS off & brakes released, EBS sound still on -> expect DS_Emergency")
+    log("DSMS off & brakes released, EBS sound still on -> expect DS_Emergency")
     vcu.dsms_status = False
     vcu.brake_status = False
     status = _run_ticks(sm, vcu, 1)
@@ -238,7 +238,7 @@ SCENARIOS = {
 
 HELP_TEXT = """Commands (each one applies the change, then steps the state machine once):
   ready                     - Apply all DS_Ready preconditions
-  dsms [on|off]             - Driverless System Master Switch (ASMS)
+  dsms [on|off]             - Driverless System Master Switch (DSMS)
   ebs [armed|act|unavail]   - EBS status (unavail + mission manual + ts on -> Manual Driving)
   sound [on|off]            - EBS warning sound (DS_Emergency exits once it is off)
   sdc [trip|close]          - Open or close the shutdown circuit
@@ -247,7 +247,7 @@ HELP_TEXT = """Commands (each one applies the change, then steps the state machi
   go [press|rel]            - Press or release RES Go
   brakes [on|off]           - Brake status
   speed <vx>                - Longitudinal velocity in m/s
-  mission <name>            - AMI mission (manual, inspection, acceleration, skidpad, ...)
+  mission <name>            - DMI mission (manual, inspection, acceleration, skidpad, ...)
   step [n]                  - Step n cycles without changing anything (default 1)
   status                    - Step once and print
   help                      - Show this help

@@ -182,7 +182,7 @@ def test_injected_mission_behavior() -> None:
     ],
 )
 def test_emergency_holds_until_every_exit_condition(state_machine: Level1StateMachine, blocking: dict) -> None:
-    """flowchart.png: DS_Emergency stays latched while any of EBS sound / ASMS / brakes is still on."""
+    """flowchart.png: DS_Emergency stays latched while any of EBS sound / DSMS / brakes is still on."""
     state_machine.step(make_ready_telemetry(timestamp=1.0))
     state_machine.request_emergency_trip(DiagnosticErrorCode.SDC_OPEN, timestamp=1.02)
 
@@ -193,7 +193,7 @@ def test_emergency_holds_until_every_exit_condition(state_machine: Level1StateMa
 
 
 def test_emergency_exits_to_off_per_flowchart(state_machine: Level1StateMachine) -> None:
-    """flowchart.png: EBS Sound Off & ASMS off & Brakes Released -> DS_Off, clearing the fault code.
+    """flowchart.png: EBS Sound Off & DSMS off & Brakes Released -> DS_Off, clearing the fault code.
 
     The SDC is still open here (normal right after an EBS trip); the flowchart does not require it closed.
     """
@@ -278,7 +278,7 @@ def test_emergency_is_published_before_it_can_clear() -> None:
     """A trip must reach the VCU at least once, even if the late packet already meets the exit conditions."""
     sm = Level1StateMachine()
     t = drive_to_ds_driving(sm)
-    late_packet = make_telemetry(timestamp=t + 0.3)  # ASMS off, brakes released, sound off
+    late_packet = make_telemetry(timestamp=t + 0.3)  # DSMS off, brakes released, sound off
     status, act = sm.step(late_packet)
     assert status.current_state == MacroState.DS_EMERGENCY
     assert status.error_code & DiagnosticErrorCode.WATCHDOG_TIMEOUT_VCU
