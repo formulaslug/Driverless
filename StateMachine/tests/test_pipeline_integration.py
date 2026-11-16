@@ -61,8 +61,8 @@ def test_statemachine_node_in_pipeline_graph() -> None:
     assert len(sink.received_statuses) == 10
     assert len(sink.received_actuations) == 10
 
-    # First packet transitions from AS_Off to AS_Ready
-    assert sink.received_statuses[0].current_state == MacroState.AS_READY
+    # First packet transitions from DS_Off to DS_Ready
+    assert sink.received_statuses[0].current_state == MacroState.DS_READY
     assert sink.received_actuations[0].gated is False
     assert np.allclose(sink.received_actuations[0].throttle, 0.0)
 
@@ -80,29 +80,29 @@ def test_link_loss_trips_emergency_without_new_packets() -> None:
     clock = FakeClock()
     node = StateMachineNode(clock=clock)
     node.process(make_ready_telemetry(timestamp=1.0))
-    assert node.state_machine.current_state == MacroState.AS_READY
+    assert node.state_machine.current_state == MacroState.DS_READY
 
     clock.now += 0.1
     assert node.check_link() is None
 
     clock.now += 0.2  # 300 ms of silence
     status, actuation = node.check_link()
-    assert status.current_state == MacroState.AS_EMERGENCY
+    assert status.current_state == MacroState.DS_EMERGENCY
     assert status.error_code & DiagnosticErrorCode.WATCHDOG_TIMEOUT_VCU
     assert np.isclose(status.timestamp, 1.3)
     assert np.allclose(actuation.braking, 1.0) and actuation.gated is False
 
     clock.now += 1.0
-    assert node.check_link() is None  # already in AS_Emergency: emit once, not every tick
+    assert node.check_link() is None  # already in DS_Emergency: emit once, not every tick
 
 
-def test_link_loss_is_ignored_in_as_off() -> None:
+def test_link_loss_is_ignored_in_ds_off() -> None:
     clock = FakeClock()
     node = StateMachineNode(clock=clock)
     node.process(make_telemetry(timestamp=1.0))
     clock.now += 5.0
     assert node.check_link() is None
-    assert node.state_machine.current_state == MacroState.AS_OFF
+    assert node.state_machine.current_state == MacroState.DS_OFF
 
 
 def test_watchdog_thread_publishes_emergency() -> None:
@@ -115,7 +115,7 @@ def test_watchdog_thread_publishes_emergency() -> None:
 
     states = []
     deadline = time.monotonic() + 2.0
-    while time.monotonic() < deadline and MacroState.AS_EMERGENCY not in states:
+    while time.monotonic() < deadline and MacroState.DS_EMERGENCY not in states:
         try:
             message = out.get(timeout=0.1)
         except queue.Empty:
@@ -125,8 +125,8 @@ def test_watchdog_thread_publishes_emergency() -> None:
 
     node.inputQueue.put(POISON)
     node.join()
-    assert states[0] == MacroState.AS_READY
-    assert MacroState.AS_EMERGENCY in states
+    assert states[0] == MacroState.DS_READY
+    assert MacroState.DS_EMERGENCY in states
 
 
 def test_node_forwards_planner_messages_to_state_machine() -> None:
@@ -140,7 +140,7 @@ def test_node_forwards_planner_messages_to_state_machine() -> None:
     t += DT
     node.process(ActuationCommandMessage(timestamp=t, braking=np.array([1.0])))
     node.process(make_ready_telemetry(timestamp=t, res_go=True, mission=Mission.ACCELERATION))
-    assert node.state_machine.current_state == MacroState.AS_DRIVING
+    assert node.state_machine.current_state == MacroState.DS_DRIVING
 
     for _ in range(60):
         t += DT
@@ -149,7 +149,7 @@ def test_node_forwards_planner_messages_to_state_machine() -> None:
             Level2StatusMessage(timestamp=t, active_substate="STOP", mission_finished=True, emergency_stop=False)
         ) is None
         status, _ = node.process(make_ready_telemetry(timestamp=t, mission=Mission.ACCELERATION))
-    assert status.current_state == MacroState.AS_FINISHED
+    assert status.current_state == MacroState.DS_FINISHED
 
 
 def test_mock_vcu_interactive_mode() -> None:
@@ -179,7 +179,7 @@ def test_mock_vcu_interactive_mode() -> None:
 
     run_interactive_mode(input_fn=mock_input, output_fn=mock_output)
 
-    assert any("Applied AS_Ready preconditions" in out for out in outputs)
+    assert any("Applied DS_Ready preconditions" in out for out in outputs)
     assert any("Stepped 10 cycles" in out for out in outputs)
     assert any("Longitudinal speed set to: 5.00 m/s" in out for out in outputs)
     assert any("Exiting interactive shell" in out for out in outputs)
@@ -191,9 +191,9 @@ def test_mock_vcu_interactive_reaches_manual_driving_and_emergency_exit() -> Non
 
     commands = iter([
         "ebs unavail", "dsms off", "ts on", "mission manual",  # -> MANUAL_DRIVING
-        "ts off",                                              # -> AS_OFF
-        "ready", "sdc trip", "sound on",                       # AS_READY -> AS_EMERGENCY
-        "sdc close", "dsms off", "brakes off", "sound off",    # -> AS_OFF
+        "ts off",                                              # -> DS_OFF
+        "ready", "sdc trip", "sound on",                       # DS_READY -> DS_EMERGENCY
+        "sdc close", "dsms off", "brakes off", "sound off",    # -> DS_OFF
         "quit",
     ])
     outputs = []
@@ -201,9 +201,9 @@ def test_mock_vcu_interactive_reaches_manual_driving_and_emergency_exit() -> Non
 
     states = [line.split("State: ")[1].split(" |")[0] for line in outputs if "State: " in line]
     assert "MANUAL_DRIVING" in states
-    i = states.index("AS_EMERGENCY")
-    assert states[i:-1].count("AS_EMERGENCY") == len(states[i:-1])  # latched until the sound goes off
-    assert states[-1] == "AS_OFF"
+    i = states.index("DS_EMERGENCY")
+    assert states[i:-1].count("DS_EMERGENCY") == len(states[i:-1])  # latched until the sound goes off
+    assert states[-1] == "DS_OFF"
 
 
 def test_mock_vcu_scenarios_pass() -> None:
@@ -231,4 +231,4 @@ def test_step_that_keeps_raising_still_trips_link_watchdog() -> None:
         except RuntimeError:
             pass  # the pipeline base class logs and skips these
     status, _ = node.check_link()
-    assert status.current_state == MacroState.AS_EMERGENCY
+    assert status.current_state == MacroState.DS_EMERGENCY

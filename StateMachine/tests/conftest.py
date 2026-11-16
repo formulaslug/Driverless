@@ -30,7 +30,7 @@ def state_machine() -> Level1StateMachine:
 
 
 def make_telemetry(timestamp: float = 0.0, velocity: float = 0.0, **overrides) -> VcuTelemetryMessage:
-    """Quiescent AS_Off telemetry (car parked, everything off), with field overrides."""
+    """Quiescent DS_Off telemetry (car parked, everything off), with field overrides."""
     fields = dict(
         timestamp=timestamp,
         ebs_status=EbsStatus.ARMED,
@@ -50,7 +50,7 @@ def make_telemetry(timestamp: float = 0.0, velocity: float = 0.0, **overrides) -
 
 @pytest.fixture
 def base_telemetry() -> VcuTelemetryMessage:
-    """Fixture providing a default quiescent telemetry message in AS_Off."""
+    """Fixture providing a default quiescent telemetry message in DS_Off."""
     return make_telemetry()
 
 
@@ -61,7 +61,7 @@ def make_ready_telemetry(
     velocity: float = 0.0,
     **overrides,
 ) -> VcuTelemetryMessage:
-    """Telemetry that satisfies every AS_Off -> AS_Ready precondition."""
+    """Telemetry that satisfies every DS_Off -> DS_Ready precondition."""
     fields = dict(
         dsms_status=True,
         ts_status=True,
@@ -73,13 +73,13 @@ def make_ready_telemetry(
     return make_telemetry(timestamp=timestamp, velocity=velocity, **fields)
 
 
-def drive_to_as_driving(
+def drive_to_ds_driving(
     sm: Level1StateMachine,
     mission: Mission = Mission.INSPECTION,
     start: float = 1.0,
     command: Optional[ActuationCommandMessage] = None,
 ) -> float:
-    """Walk ``sm`` through AS_Ready and the 5 s lockout into AS_Driving. Returns the last timestamp."""
+    """Walk ``sm`` through DS_Ready and the 5 s lockout into DS_Driving. Returns the last timestamp."""
     t = start
     sm.step(make_ready_telemetry(timestamp=t, mission=mission))
     for _ in range(260):
@@ -89,7 +89,7 @@ def drive_to_as_driving(
     if command is not None:
         command = dataclasses.replace(command, timestamp=t)
     sm.step(make_ready_telemetry(timestamp=t, res_go=True, mission=mission), external_actuation=command)
-    assert sm.current_state == MacroState.AS_DRIVING
+    assert sm.current_state == MacroState.DS_DRIVING
     return t
 
 

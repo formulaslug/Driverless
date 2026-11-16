@@ -57,7 +57,7 @@ class InspectionMission(MissionBehavior):
         return self._substate
 
     def on_enter(self, context: MissionContext) -> None:
-        """Initialize inspection routine upon transition to AS_Driving."""
+        """Initialize inspection routine upon transition to DS_Driving."""
         self._substate = InspectionSubState.STEERING_SWEEP
         self._substate_start_time = context.mission_time
 

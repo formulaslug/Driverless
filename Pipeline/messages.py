@@ -9,11 +9,11 @@ import numpy as np
 
 class MacroState(IntEnum):
     """FSAE Driverless Level 1 Macro-States."""
-    AS_OFF = 0
-    AS_READY = 1
-    AS_DRIVING = 2
-    AS_FINISHED = 3
-    AS_EMERGENCY = 4
+    DS_OFF = 0
+    DS_READY = 1
+    DS_DRIVING = 2
+    DS_FINISHED = 3
+    DS_EMERGENCY = 4
     MANUAL_DRIVING = 5
 
 
@@ -45,7 +45,7 @@ class Mission(IntEnum):
 
 
 class DiagnosticErrorCode(IntFlag):
-    """Fault bitmask reported while in AS_Emergency. Every flag is raised somewhere in Level 1."""
+    """Fault bitmask reported while in DS_Emergency. Every flag is raised somewhere in Level 1."""
     NONE = 0
     SDC_OPEN = 1 << 0
     EBS_ACTIVATED_UNEXPECTED = 1 << 1

@@ -1,12 +1,12 @@
 """Level 3 actuation safety gate.
 
 Every outgoing actuator command passes through ``gate_command``:
-- AS_Driving: a valid command is clamped to physical limits and passed through
+- DS_Driving: a valid command is clamped to physical limits and passed through
   (``gated=True``). A missing, non-finite or mis-shaped command is replaced by a
   service-brake stop.
 - Every other state: throttle and steering are forced to zero and the brake is
-  set by the state (service brake in AS_Ready, EBS in AS_Finished/AS_Emergency,
-  released in AS_Off/Manual).
+  set by the state (service brake in DS_Ready, EBS in DS_Finished/DS_Emergency,
+  released in DS_Off/Manual).
 """
 
 from typing import Optional, Tuple
@@ -29,10 +29,10 @@ from StateMachine.constants import (
 
 # Brake held in each state when actuation is not passed through.
 _HOLD_BRAKE = {
-    MacroState.AS_READY: BRAKE_SERVICE_NORM,
-    MacroState.AS_DRIVING: BRAKE_SERVICE_NORM,
-    MacroState.AS_FINISHED: BRAKE_EBS_NORM,
-    MacroState.AS_EMERGENCY: BRAKE_EBS_NORM,
+    MacroState.DS_READY: BRAKE_SERVICE_NORM,
+    MacroState.DS_DRIVING: BRAKE_SERVICE_NORM,
+    MacroState.DS_FINISHED: BRAKE_EBS_NORM,
+    MacroState.DS_EMERGENCY: BRAKE_EBS_NORM,
 }
 
 
@@ -60,7 +60,7 @@ def gate_command(
     """Return the actuation command that is safe to send to the VCU in ``state``."""
     shape = requested_command.steering.shape if requested_command is not None else (1,)
 
-    if state != MacroState.AS_DRIVING or requested_command is None:
+    if state != MacroState.DS_DRIVING or requested_command is None:
         return _stop_command(timestamp, shape, _HOLD_BRAKE.get(state, BRAKE_ZERO_NORM))
 
     if not _is_valid(requested_command):

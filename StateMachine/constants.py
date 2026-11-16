@@ -4,14 +4,14 @@
 STATE_MACHINE_TICK_RATE_HZ: float = 50.0
 STATE_MACHINE_DEFAULT_DT_S: float = 1.0 / STATE_MACHINE_TICK_RATE_HZ
 
-# AS_Ready lockout timer (PDR specification: >= 5.0 seconds)
-AS_READY_LOCKOUT_DURATION_S: float = 5.0
+# DS_Ready lockout timer (PDR specification: >= 5.0 seconds)
+DS_READY_LOCKOUT_DURATION_S: float = 5.0
 
-# Standstill detection parameters for AS_Driving -> AS_Finished
+# Standstill detection parameters for DS_Driving -> DS_Finished
 STANDSTILL_VELOCITY_THRESHOLD_MPS: float = 0.05  # |v_x| < 0.05 m/s
 STANDSTILL_MIN_DURATION_S: float = 0.5           # continuous duration required at standstill
 STANDSTILL_BUFFER_CAPACITY: int = 100            # ring buffer capacity (2.0s at 50 Hz)
-FINISH_STANDSTILL_TIMEOUT_S: float = 5.0         # mission finished but still moving -> AS_Emergency
+FINISH_STANDSTILL_TIMEOUT_S: float = 5.0         # mission finished but still moving -> DS_Emergency
 
 # Watchdog timeout limits
 VCU_WATCHDOG_TIMEOUT_S: float = 0.2              # 200 ms timeout per FSAE rules

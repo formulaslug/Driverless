@@ -53,7 +53,7 @@ class MockVcuSimulator:
         self.velocity = np.zeros(3, dtype=np.float64)
 
     def set_readiness_preconditions(self) -> None:
-        """Set all physical preconditions required for AS_Off -> AS_Ready."""
+        """Set all physical preconditions required for DS_Off -> DS_Ready."""
         self.ebs_status = EbsStatus.ARMED
         self.ebs_sound_active = False
         self.dsms_status = True
@@ -120,22 +120,22 @@ def _run_ticks(sm: Level1StateMachine, vcu: MockVcuSimulator, n: int) -> StateMa
 
 
 def _ready_then_go(sm: Level1StateMachine, vcu: MockVcuSimulator, log: Callable[[str], None]) -> None:
-    """AS_Off -> AS_Ready -> (5.1 s) -> AS_Driving."""
+    """DS_Off -> DS_Ready -> (5.1 s) -> DS_Driving."""
     vcu.set_readiness_preconditions()
     status = _run_ticks(sm, vcu, 1)
-    _expect(status.current_state == MacroState.AS_READY, f"expected AS_READY, got {status.current_state.name}")
-    _expect(status.dssi_status == DSSIStatus.CONTINUOUS_YELLOW, "DSSI should be continuous yellow in AS_Ready")
+    _expect(status.current_state == MacroState.DS_READY, f"expected DS_READY, got {status.current_state.name}")
+    _expect(status.dssi_status == DSSIStatus.CONTINUOUS_YELLOW, "DSSI should be continuous yellow in DS_Ready")
 
-    log("Waiting out the 5.0 s AS_Ready lockout")
+    log("Waiting out the 5.0 s DS_Ready lockout")
     status = _run_ticks(sm, vcu, 255)
-    _expect(status.current_state == MacroState.AS_READY, "left AS_Ready during the lockout")
+    _expect(status.current_state == MacroState.DS_READY, "left DS_Ready during the lockout")
 
-    log("RES Go -> expect AS_Driving")
+    log("RES Go -> expect DS_Driving")
     vcu.res_go_signal = True
     vcu.brake_status = False
     status = _run_ticks(sm, vcu, 1)
     vcu.res_go_signal = False
-    _expect(status.current_state == MacroState.AS_DRIVING, f"expected AS_DRIVING, got {status.current_state.name}")
+    _expect(status.current_state == MacroState.DS_DRIVING, f"expected DS_DRIVING, got {status.current_state.name}")
 
 
 def run_normal_mission_scenario(log: Callable[[str], None] = print) -> None:
@@ -143,19 +143,19 @@ def run_normal_mission_scenario(log: Callable[[str], None] = print) -> None:
     sm, vcu = Level1StateMachine(), MockVcuSimulator()
     _ready_then_go(sm, vcu, log)
 
-    log("Running the inspection mission until AS_Finished")
+    log("Running the inspection mission until DS_Finished")
     for _ in range(600):
         status, _ = sm.step(vcu.step())
-        if status.current_state == MacroState.AS_FINISHED:
+        if status.current_state == MacroState.DS_FINISHED:
             break
-    _expect(status.current_state == MacroState.AS_FINISHED, f"expected AS_FINISHED, got {status.current_state.name}")
-    _expect(status.ebs_trigger_cmd, "EBS must be commanded in AS_Finished")
+    _expect(status.current_state == MacroState.DS_FINISHED, f"expected DS_FINISHED, got {status.current_state.name}")
+    _expect(status.ebs_trigger_cmd, "EBS must be commanded in DS_Finished")
 
-    log("ASMS off & brakes released -> expect AS_Off")
+    log("ASMS off & brakes released -> expect DS_Off")
     vcu.dsms_status = False
     vcu.brake_status = False
     status = _run_ticks(sm, vcu, 1)
-    _expect(status.current_state == MacroState.AS_OFF, f"expected AS_OFF, got {status.current_state.name}")
+    _expect(status.current_state == MacroState.DS_OFF, f"expected DS_OFF, got {status.current_state.name}")
     log("SUCCESS: normal mission")
 
 
@@ -169,22 +169,22 @@ def run_premature_res_scenario(log: Callable[[str], None] = print) -> None:
     vcu.res_go_signal = True
     status = _run_ticks(sm, vcu, 1)
     vcu.res_go_signal = False
-    _expect(status.current_state == MacroState.AS_READY, "car launched during the lockout")
+    _expect(status.current_state == MacroState.DS_READY, "car launched during the lockout")
 
     log("Advancing to t = 5.5 s without pressing again")
     status = _run_ticks(sm, vcu, 175)
-    _expect(status.current_state == MacroState.AS_READY, "car launched from a remembered premature press")
+    _expect(status.current_state == MacroState.DS_READY, "car launched from a remembered premature press")
 
-    log("Fresh RES Go -> expect AS_Driving")
+    log("Fresh RES Go -> expect DS_Driving")
     vcu.res_go_signal = True
     vcu.brake_status = False
     status = _run_ticks(sm, vcu, 1)
-    _expect(status.current_state == MacroState.AS_DRIVING, f"expected AS_DRIVING, got {status.current_state.name}")
+    _expect(status.current_state == MacroState.DS_DRIVING, f"expected DS_DRIVING, got {status.current_state.name}")
     log("SUCCESS: premature RES Go rejected")
 
 
 def run_sdc_trip_scenario(log: Callable[[str], None] = print) -> None:
-    """SDC opens in AS_Driving -> AS_Emergency, then the flowchart exit back to AS_Off."""
+    """SDC opens in DS_Driving -> DS_Emergency, then the flowchart exit back to DS_Off."""
     sm, vcu = Level1StateMachine(), MockVcuSimulator()
     _ready_then_go(sm, vcu, log)
 
@@ -193,32 +193,32 @@ def run_sdc_trip_scenario(log: Callable[[str], None] = print) -> None:
     vcu.ebs_status = EbsStatus.ACTIVATED
     vcu.ebs_sound_active = True
     status, act = sm.step(vcu.step())
-    _expect(status.current_state == MacroState.AS_EMERGENCY, f"expected AS_EMERGENCY, got {status.current_state.name}")
-    _expect(status.dssi_status == DSSIStatus.CONTINUOUS_BLUE, "DSSI should be continuous blue in AS_Emergency")
+    _expect(status.current_state == MacroState.DS_EMERGENCY, f"expected DS_EMERGENCY, got {status.current_state.name}")
+    _expect(status.dssi_status == DSSIStatus.CONTINUOUS_BLUE, "DSSI should be continuous blue in DS_Emergency")
     _expect(status.ebs_trigger_cmd and not act.gated, "EBS must be commanded and actuation gated off")
 
-    log("ASMS off & brakes released, EBS sound still on -> expect AS_Emergency")
+    log("ASMS off & brakes released, EBS sound still on -> expect DS_Emergency")
     vcu.dsms_status = False
     vcu.brake_status = False
     status = _run_ticks(sm, vcu, 1)
-    _expect(status.current_state == MacroState.AS_EMERGENCY, "left AS_Emergency while the EBS sound was on")
+    _expect(status.current_state == MacroState.DS_EMERGENCY, "left DS_Emergency while the EBS sound was on")
 
-    log("EBS sound off -> expect AS_Off")
+    log("EBS sound off -> expect DS_Off")
     vcu.ebs_sound_active = False
     status = _run_ticks(sm, vcu, 1)
-    _expect(status.current_state == MacroState.AS_OFF, f"expected AS_OFF, got {status.current_state.name}")
+    _expect(status.current_state == MacroState.DS_OFF, f"expected DS_OFF, got {status.current_state.name}")
     log("SUCCESS: SDC trip and emergency exit")
 
 
 def run_watchdog_trip_scenario(log: Callable[[str], None] = print) -> None:
-    """A 300 ms telemetry gap in AS_Ready trips the VCU watchdog."""
+    """A 300 ms telemetry gap in DS_Ready trips the VCU watchdog."""
     sm, vcu = Level1StateMachine(), MockVcuSimulator()
     vcu.set_readiness_preconditions()
     _run_ticks(sm, vcu, 1)
 
     log("Injecting a 300 ms telemetry dropout")
     status, act = sm.step(vcu.step(dt=0.30))
-    _expect(status.current_state == MacroState.AS_EMERGENCY, f"expected AS_EMERGENCY, got {status.current_state.name}")
+    _expect(status.current_state == MacroState.DS_EMERGENCY, f"expected DS_EMERGENCY, got {status.current_state.name}")
     _expect(bool(status.error_code & DiagnosticErrorCode.WATCHDOG_TIMEOUT_VCU), "missing WATCHDOG_TIMEOUT_VCU")
     _expect(status.ebs_trigger_cmd and not act.gated, "EBS must be commanded and actuation gated off")
     log("SUCCESS: VCU watchdog")
@@ -237,10 +237,10 @@ SCENARIOS = {
 # ---------------------------------------------------------------------------
 
 HELP_TEXT = """Commands (each one applies the change, then steps the state machine once):
-  ready                     - Apply all AS_Ready preconditions
+  ready                     - Apply all DS_Ready preconditions
   dsms [on|off]             - Driverless System Master Switch (ASMS)
   ebs [armed|act|unavail]   - EBS status (unavail + mission manual + ts on -> Manual Driving)
-  sound [on|off]            - EBS warning sound (AS_Emergency exits once it is off)
+  sound [on|off]            - EBS warning sound (DS_Emergency exits once it is off)
   sdc [trip|close]          - Open or close the shutdown circuit
   ts [on|off]               - Tractive system
   dbs [ok|fail]             - DBS check result
@@ -305,7 +305,7 @@ def run_interactive_mode(input_fn=input, output_fn=print) -> None:
 
         if cmd == "ready":
             vcu.set_readiness_preconditions()
-            output_fn("Applied AS_Ready preconditions.")
+            output_fn("Applied DS_Ready preconditions.")
         elif cmd == "dsms":
             vcu.dsms_status = _is_on(args)
             output_fn(f"DSMS: {vcu.dsms_status}")
