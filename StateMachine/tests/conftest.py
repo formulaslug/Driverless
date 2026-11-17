@@ -38,7 +38,7 @@ def make_telemetry(timestamp: float = 0.0, velocity: float = 0.0, **overrides) -
         dsms_status=False,
         dbs_check_ok=True,
         ts_status=False,
-        ami_mission=Mission.NOT_SELECTED,
+        dmi_mission=Mission.NOT_SELECTED,
         brake_status=False,
         sdc_status=True,
         res_go_signal=False,
@@ -65,7 +65,7 @@ def make_ready_telemetry(
     fields = dict(
         dsms_status=True,
         ts_status=True,
-        ami_mission=mission,
+        dmi_mission=mission,
         brake_status=True,
         res_go_signal=res_go,
     )

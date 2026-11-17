@@ -1,4 +1,4 @@
-"""Autonomous Inspection Mission implementation with NumPy test profiles."""
+"""Driverless Inspection Mission implementation with NumPy test profiles."""
 
 from enum import Enum
 import numpy as np
@@ -9,7 +9,7 @@ from StateMachine.level2.registry import MissionRegistry
 
 
 class InspectionSubState(str, Enum):
-    """Sub-states of the Autonomous Inspection Mission."""
+    """Sub-states of the Driverless Inspection Mission."""
     STEERING_SWEEP = "STEERING_SWEEP"
     POWERTRAIN_RAMP = "POWERTRAIN_RAMP"
     CONTROLLED_STOP = "CONTROLLED_STOP"
@@ -50,7 +50,7 @@ class InspectionMission(MissionBehavior):
 
     @property
     def name(self) -> str:
-        return "Autonomous Inspection Mission"
+        return "Driverless Inspection Mission"
 
     @property
     def current_substate(self) -> InspectionSubState:

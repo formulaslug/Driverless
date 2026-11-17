@@ -46,7 +46,7 @@ class MockVcuSimulator:
         self.dsms_status = False
         self.dbs_check_ok = True
         self.ts_status = True
-        self.ami_mission = Mission.INSPECTION
+        self.dmi_mission = Mission.INSPECTION
         self.brake_status = True
         self.sdc_status = True
         self.res_go_signal = False
@@ -59,7 +59,7 @@ class MockVcuSimulator:
         self.dsms_status = True
         self.dbs_check_ok = True
         self.ts_status = True
-        self.ami_mission = Mission.INSPECTION
+        self.dmi_mission = Mission.INSPECTION
         self.brake_status = True
         self.sdc_status = True
         self.res_go_signal = False
@@ -72,12 +72,12 @@ class MockVcuSimulator:
             timestamp=self.time,
             ebs_status=self.ebs_status,
             ebs_sound_active=self.ebs_sound_active,
-            dsms_status=self.dsms_status,
+            dsms_on=self.dsms_status,
             dbs_check_ok=self.dbs_check_ok,
-            ts_status=self.ts_status,
-            ami_mission=self.ami_mission,
-            brake_status=self.brake_status,
-            sdc_status=self.sdc_status,
+            ts_active=self.ts_status,
+            dmi_mission=self.dmi_mission,
+            brakes_engaged=self.brake_status,
+            sdc_closed=self.sdc_status,
             res_go_signal=self.res_go_signal,
             velocity=self.velocity.copy(),
         )
@@ -339,8 +339,8 @@ def run_interactive_mode(input_fn=input, output_fn=print) -> None:
                 output_fn(f"Current speed: {vcu.velocity[0]:.2f} m/s (usage: speed <vx>)")
         elif cmd == "mission":
             try:
-                vcu.ami_mission = Mission[args[0].upper()]
-                output_fn(f"Selected mission: {vcu.ami_mission.name}")
+                vcu.dmi_mission = Mission[args[0].upper()]
+                output_fn(f"Selected mission: {vcu.dmi_mission.name}")
             except (IndexError, KeyError):
                 output_fn(f"Choices: {[m.name.lower() for m in Mission]}")
         elif cmd != "status":

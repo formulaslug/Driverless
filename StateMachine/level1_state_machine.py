@@ -7,10 +7,10 @@ Every transition below maps to an arrow in flowchart.png unless marked
     DS_Off       -> Manual_Driving  manual mission & EBS unavailable & DSMS off & TS on
     Manual       -> DS_Off          TS off
     DS_Ready     -> DS_Off          DSMS off & brakes released
-    DS_Ready     -> DS_Driving      RES Go (fresh press) & 5 s passed
+    DS_Ready     -> DS_Driving      RES Go (fresh press) & 5s passed
     DS_Ready     -> DS_Emergency    EBS activated (safety extension: also SDC open, VCU link lost)
     DS_Driving   -> DS_Finished     mission finished & velocity = 0
-    DS_Driving   -> DS_Emergency    EBS activated (safety extension: SDC open, DSMS/TS drop,
+    DS_Driving   -> DS_Emergency    EBS activated (safety extension: SDC open at RSS, DSMS/TS drop,
                                     VCU or Level 2 link lost, Level 2 crash or e-stop,
                                     no standstill after mission finished)
     DS_Finished  -> DS_Off          DSMS off & brakes released
@@ -59,11 +59,11 @@ VALID_DRIVERLESS_MISSIONS: Set[Mission] = {
 }
 
 STATE_DSSI_MAP: Dict[MacroState, DSSIStatus] = {
-    MacroState.DS_OFF: DSSIStatus.OFF,
-    MacroState.DS_READY: DSSIStatus.CONTINUOUS_YELLOW,
-    MacroState.DS_DRIVING: DSSIStatus.FLASHING_YELLOW,
-    MacroState.DS_FINISHED: DSSIStatus.FLASHING_BLUE,
-    MacroState.DS_EMERGENCY: DSSIStatus.CONTINUOUS_BLUE,
+    MacroState.DS_OFF:         DSSIStatus.OFF,
+    MacroState.DS_READY:       DSSIStatus.CONTINUOUS_YELLOW,
+    MacroState.DS_DRIVING:     DSSIStatus.FLASHING_YELLOW,
+    MacroState.DS_FINISHED:    DSSIStatus.FLASHING_BLUE,
+    MacroState.DS_EMERGENCY:   DSSIStatus.CONTINUOUS_BLUE,
     MacroState.MANUAL_DRIVING: DSSIStatus.OFF,
 }
 
@@ -288,24 +288,24 @@ class Level1StateMachine:
             now: Current telemetry timestamp.
         """
         if (
-            tel.ami_mission == Mission.MANUAL
+            tel.dmi_mission == Mission.MANUAL
             and tel.ebs_status == EbsStatus.UNAVAILABLE
-            and not tel.dsms_status
-            and tel.ts_status
+            and not tel.dsms_on
+            and tel.ts_active
         ):
             self._set_state(MacroState.MANUAL_DRIVING, now)
             return
 
         if (
             tel.ebs_status == EbsStatus.ARMED
-            and tel.dsms_status
+            and tel.dsms_on
             and tel.dbs_check_ok
-            and tel.ts_status
-            and tel.ami_mission in VALID_DRIVERLESS_MISSIONS
-            and tel.brake_status
-            and tel.sdc_status
+            and tel.ts_active
+            and tel.dmi_mission in VALID_DRIVERLESS_MISSIONS
+            and tel.brakes_engaged
+            and tel.sdc_closed
         ):
-            self._mission = tel.ami_mission
+            self._mission = tel.dmi_mission
             self._set_state(MacroState.DS_READY, now)
 
     def _step_ds_ready(self, tel: VcuTelemetryMessage, now: float) -> None:
@@ -326,13 +326,13 @@ class Level1StateMachine:
             tel: Latest VCU telemetry packet.
             now: Current telemetry timestamp.
         """
-        if not tel.sdc_status:
+        if not tel.sdc_closed:
             self._trip_emergency(DiagnosticErrorCode.SDC_OPEN, now)
             return
         if tel.ebs_status == EbsStatus.ACTIVATED:
             self._trip_emergency(DiagnosticErrorCode.EBS_ACTIVATED_UNEXPECTED, now)
             return
-        if not tel.dsms_status and not tel.brake_status:
+        if not tel.dsms_on and not tel.brakes_engaged:
             self._set_state(MacroState.DS_OFF, now)
             return
 
@@ -347,8 +347,8 @@ class Level1StateMachine:
         if (
             tel.res_go_signal
             and tel.ebs_status == EbsStatus.ARMED
-            and tel.dsms_status
-            and tel.ts_status
+            and tel.dsms_on
+            and tel.ts_active
             and tel.dbs_check_ok
         ):
             self._set_state(MacroState.DS_DRIVING, now)
@@ -381,10 +381,10 @@ class Level1StateMachine:
             The requested actuation command, or None to stop the car.
         """
         hardware_faults = (
-            (not tel.sdc_status, DiagnosticErrorCode.SDC_OPEN),
+            (not tel.sdc_closed, DiagnosticErrorCode.SDC_OPEN),
             (tel.ebs_status == EbsStatus.ACTIVATED, DiagnosticErrorCode.EBS_ACTIVATED_UNEXPECTED),
-            (not tel.dsms_status, DiagnosticErrorCode.DSMS_UNEXPECTED_DROP),
-            (not tel.ts_status, DiagnosticErrorCode.TS_INACTIVE),
+            (not tel.dsms_on, DiagnosticErrorCode.DSMS_UNEXPECTED_DROP),
+            (not tel.ts_active, DiagnosticErrorCode.TS_INACTIVE),
         )
         for failed, fault in hardware_faults:
             if failed:
@@ -425,7 +425,7 @@ class Level1StateMachine:
             tel: Latest VCU telemetry packet.
             now: Current telemetry timestamp.
         """
-        if not tel.dsms_status and not tel.brake_status:
+        if not tel.dsms_on and not tel.brakes_engaged:
             self._set_state(MacroState.DS_OFF, now)
 
     def _step_ds_emergency(self, tel: VcuTelemetryMessage, now: float) -> None:
@@ -438,7 +438,7 @@ class Level1StateMachine:
         # Never clear an emergency the VCU has not been told about yet.
         if not self._emergency_reported:
             return
-        if not tel.ebs_sound_active and not tel.dsms_status and not tel.brake_status:
+        if not tel.ebs_sound_active and not tel.dsms_on and not tel.brakes_engaged:
             logger.info("EMERGENCY CLEARED at t=%.3fs (faults were %r)", now, self._error_code)
             self._set_state(MacroState.DS_OFF, now)
 
@@ -449,7 +449,7 @@ class Level1StateMachine:
             tel: Latest VCU telemetry packet.
             now: Current telemetry timestamp.
         """
-        if not tel.ts_status:
+        if not tel.ts_active:
             self._set_state(MacroState.DS_OFF, now)
 
     # -----------------------------------------------------------------------

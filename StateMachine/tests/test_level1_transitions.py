@@ -46,7 +46,7 @@ def test_transition_ds_off_to_ds_ready(state_machine: Level1StateMachine) -> Non
         {"dsms_status": False},
         {"dbs_check_ok": False},
         {"ts_status": False},
-        {"ami_mission": Mission.NOT_SELECTED},
+        {"dmi_mission": Mission.NOT_SELECTED},
         {"brake_status": False},
         {"sdc_status": False},
     ],
@@ -62,7 +62,7 @@ def test_ds_off_stays_in_off_if_any_precondition_missing(
         "dsms_status": True,
         "dbs_check_ok": True,
         "ts_status": True,
-        "ami_mission": Mission.INSPECTION,
+        "dmi_mission": Mission.INSPECTION,
         "brake_status": True,
         "sdc_status": True,
         "res_go_signal": False,
@@ -83,12 +83,12 @@ def test_manual_driving_transition(state_machine: Level1StateMachine) -> None:
         timestamp=1.0,
         ebs_status=EbsStatus.UNAVAILABLE,
         ebs_sound_active=False,
-        dsms_status=False,
+        dsms_on=False,
         dbs_check_ok=True,
-        ts_status=True,
-        ami_mission=Mission.MANUAL,
-        brake_status=False,
-        sdc_status=True,
+        ts_active=True,
+        dmi_mission=Mission.MANUAL,
+        brakes_engaged=False,
+        sdc_closed=True,
         res_go_signal=False,
         velocity=np.zeros(3, dtype=np.float64),
     )
@@ -156,12 +156,12 @@ def test_transition_ds_finished_to_ds_off(state_machine: Level1StateMachine) -> 
         timestamp=t,
         ebs_status=EbsStatus.ACTIVATED,
         ebs_sound_active=False,
-        dsms_status=False,
+        dsms_on=False,
         dbs_check_ok=True,
-        ts_status=False,
-        ami_mission=Mission.NOT_SELECTED,
-        brake_status=False,
-        sdc_status=True,
+        ts_active=False,
+        dmi_mission=Mission.NOT_SELECTED,
+        brakes_engaged=False,
+        sdc_closed=True,
         res_go_signal=False,
         velocity=np.zeros(3, dtype=np.float64),
     )
@@ -189,4 +189,4 @@ def test_state_transition_and_emergency_logging(state_machine: Level1StateMachin
 def test_telemetry_safety_fields_are_required() -> None:
     """A packet missing safety fields must fail to construct, not default to 'ready'."""
     with pytest.raises(TypeError):
-        VcuTelemetryMessage(timestamp=0.0, ebs_status=EbsStatus.ARMED, dsms_status=True)
+        VcuTelemetryMessage(timestamp=0.0, ebs_status=EbsStatus.ARMED, dsms_on=True)

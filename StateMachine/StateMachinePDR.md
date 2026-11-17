@@ -100,7 +100,7 @@ Some  examples may include:
 * Milestone (M1): Pass unit tests covering every arrow in the Level 1 diagram (including the 5-second `DS_Ready` timer and fault injections).
 
 ### Phase 2: Level 2 Plugin API & "Test Subsystems" MVP State (Weeks 3–4)
-* Deliverables: Build the `BehavioralSubState` base class and implement the Autonomous Inspection Mission (open-loop sine-wave steering + low-speed wheel rotation + controlled stop to `DS_Finished`).
+* Deliverables: Build the `BehavioralSubState` base class and implement the Driverless Inspection Mission (open-loop sine-wave steering + low-speed wheel rotation + controlled stop to `DS_Finished`).
 * Milestone (M2): Full end-to-end software loop (`DS_Off` $\rightarrow$ `DS_Ready` $\rightarrow$ `DS_Driving` [Inspection] $\rightarrow$ `DS_Finished`) verified in simulation with Path Planning & Controls leads signing off on the API template.
 
 ### Phase 3: Hardware-in-the-Loop (HIL) & Bench Integration (Weeks 5–6) (Winter Quarter)

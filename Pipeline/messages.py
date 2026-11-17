@@ -34,7 +34,7 @@ class EbsStatus(IntEnum):
 
 
 class Mission(IntEnum):
-    """Autonomous Mission Indicator (AMI) mission selections."""
+    """Driverless Mission Indicator (DMI) mission selections."""
     NOT_SELECTED = 0
     MANUAL = 1
     INSPECTION = 2
@@ -45,17 +45,21 @@ class Mission(IntEnum):
 
 
 class DiagnosticErrorCode(IntFlag):
-    """Fault bitmask reported while in DS_Emergency. Every flag is raised somewhere in Level 1."""
-    NONE = 0
-    SDC_OPEN = 1 << 0
+    """Fault one-hot bitmask reported while in DS_Emergency. Every flag is raised somewhere in Level 1.
+    
+    note: If you have more than 16 errors, 
+          then change the _BIT_INDICES length in level1_state_machine.py
+    """
+    NONE                     = 0
+    SDC_OPEN                 = 1 << 0
     EBS_ACTIVATED_UNEXPECTED = 1 << 1
-    WATCHDOG_TIMEOUT_VCU = 1 << 2
-    WATCHDOG_TIMEOUT_LEVEL2 = 1 << 3
-    LEVEL2_EXCEPTION = 1 << 4
-    LEVEL2_EMERGENCY_STOP = 1 << 5
-    TS_INACTIVE = 1 << 6
-    DSMS_UNEXPECTED_DROP = 1 << 7
-    STANDSTILL_TIMEOUT = 1 << 8
+    WATCHDOG_TIMEOUT_VCU     = 1 << 2
+    WATCHDOG_TIMEOUT_LEVEL2  = 1 << 3
+    LEVEL2_EXCEPTION         = 1 << 4
+    LEVEL2_EMERGENCY_STOP    = 1 << 5
+    TS_INACTIVE              = 1 << 6
+    DSMS_UNEXPECTED_DROP     = 1 << 7
+    STANDSTILL_TIMEOUT       = 1 << 8
 
 
 # ---------------------------------------------------------------------------
@@ -72,12 +76,12 @@ class VcuTelemetryMessage:
     timestamp: float
     ebs_status: EbsStatus
     ebs_sound_active: bool
-    dsms_status: bool
+    dsms_on: bool
     dbs_check_ok: bool
-    ts_status: bool
-    ami_mission: Mission
-    brake_status: bool
-    sdc_status: bool
+    ts_active: bool
+    dmi_mission: Mission
+    brakes_engaged: bool
+    sdc_closed: bool
     res_go_signal: bool
     velocity: np.ndarray
 

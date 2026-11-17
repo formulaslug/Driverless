@@ -1,4 +1,4 @@
-"""Registry for pluggable Level 2 autonomous missions."""
+"""Registry for pluggable Level 2 Driverless Missions."""
 
 from typing import Dict, Type, Optional
 
