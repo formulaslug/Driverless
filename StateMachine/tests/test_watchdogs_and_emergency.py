@@ -45,7 +45,7 @@ def test_sdc_open_trips_emergency(state_machine: Level1StateMachine) -> None:
     assert state_machine.current_state == MacroState.DS_READY
 
     # Trip SDC
-    tel = dataclasses.replace(tel, timestamp=1.02, sdc_status=False)
+    tel = dataclasses.replace(tel, timestamp=1.02, sdc_closed=False)
     status, _ = state_machine.step(tel)
 
     assert status.current_state == MacroState.DS_EMERGENCY
@@ -83,7 +83,7 @@ def test_dsms_drop_in_driving_trips_emergency(state_machine: Level1StateMachine)
     # Drop DSMS
     t += 0.02
     tel = make_ready_telemetry(timestamp=t)
-    tel = dataclasses.replace(tel, dsms_status=False)
+    tel = dataclasses.replace(tel, dsms_on=False)
     status, _ = state_machine.step(tel)
 
     assert status.current_state == MacroState.DS_EMERGENCY
@@ -177,8 +177,8 @@ def test_injected_mission_behavior() -> None:
     "blocking",
     [
         {"ebs_sound_active": True},
-        {"dsms_status": True},
-        {"brake_status": True},
+        {"dsms_on": True},
+        {"brakes_engaged": True},
     ],
 )
 def test_emergency_holds_until_every_exit_condition(state_machine: Level1StateMachine, blocking: dict) -> None:
@@ -198,11 +198,11 @@ def test_emergency_exits_to_off_per_flowchart(state_machine: Level1StateMachine)
     The SDC is still open here (normal right after an EBS trip); the flowchart does not require it closed.
     """
     state_machine.step(make_ready_telemetry(timestamp=1.0))
-    tripped = make_ready_telemetry(timestamp=1.02, sdc_status=False)
+    tripped = make_ready_telemetry(timestamp=1.02, sdc_closed=False)
     status, _ = state_machine.step(tripped)
     assert status.current_state == MacroState.DS_EMERGENCY
 
-    status, _ = state_machine.step(make_telemetry(timestamp=1.04, sdc_status=False, ebs_status=EbsStatus.ACTIVATED))
+    status, _ = state_machine.step(make_telemetry(timestamp=1.04, sdc_closed=False, ebs_status=EbsStatus.ACTIVATED))
     assert status.current_state == MacroState.DS_OFF
     assert status.error_code == DiagnosticErrorCode.NONE
     assert status.ebs_trigger_cmd is False
@@ -241,9 +241,9 @@ def test_level2_external_planner_watchdog_timeout() -> None:
     "fault_patch, expected_fault",
     [
         ({"ebs_status": EbsStatus.ACTIVATED}, DiagnosticErrorCode.EBS_ACTIVATED_UNEXPECTED),  # flowchart arrow
-        ({"sdc_status": False}, DiagnosticErrorCode.SDC_OPEN),
-        ({"dsms_status": False}, DiagnosticErrorCode.DSMS_UNEXPECTED_DROP),
-        ({"ts_status": False}, DiagnosticErrorCode.TS_INACTIVE),
+        ({"sdc_closed": False}, DiagnosticErrorCode.SDC_OPEN),
+        ({"dsms_on": False}, DiagnosticErrorCode.DSMS_UNEXPECTED_DROP),
+        ({"ts_active": False}, DiagnosticErrorCode.TS_INACTIVE),
     ],
 )
 def test_driving_hardware_fault_trips_emergency(fault_patch: dict, expected_fault: DiagnosticErrorCode) -> None:

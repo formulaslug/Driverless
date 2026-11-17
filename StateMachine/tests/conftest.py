@@ -35,12 +35,12 @@ def make_telemetry(timestamp: float = 0.0, velocity: float = 0.0, **overrides) -
         timestamp=timestamp,
         ebs_status=EbsStatus.ARMED,
         ebs_sound_active=False,
-        dsms_status=False,
+        dsms_on=False,
         dbs_check_ok=True,
-        ts_status=False,
+        ts_active=False,
         dmi_mission=Mission.NOT_SELECTED,
-        brake_status=False,
-        sdc_status=True,
+        brakes_engaged=False,
+        sdc_closed=True,
         res_go_signal=False,
         velocity=np.array([velocity, 0.0, 0.0]),
     )
@@ -63,10 +63,10 @@ def make_ready_telemetry(
 ) -> VcuTelemetryMessage:
     """Telemetry that satisfies every DS_Off -> DS_Ready precondition."""
     fields = dict(
-        dsms_status=True,
-        ts_status=True,
+        dsms_on=True,
+        ts_active=True,
         dmi_mission=mission,
-        brake_status=True,
+        brakes_engaged=True,
         res_go_signal=res_go,
     )
     fields.update(overrides)

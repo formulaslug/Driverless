@@ -114,7 +114,7 @@ def test_status_reports_committed_mission_not_selector() -> None:
 def test_emergency_log_names_the_running_mission(caplog: pytest.LogCaptureFixture) -> None:
     sm = Level1StateMachine()
     t = drive_to_ds_driving(sm, Mission.ACCELERATION, command=brake_cmd(0.0))
-    tel = make_ready_telemetry(timestamp=t + DT, mission=Mission.ACCELERATION, sdc_status=False)
+    tel = make_ready_telemetry(timestamp=t + DT, mission=Mission.ACCELERATION, sdc_closed=False)
     with caplog.at_level(logging.INFO):
         sm.step(tel, external_actuation=brake_cmd(t + DT))
     trip = [r.message for r in caplog.records if "EMERGENCY TRIP" in r.message]

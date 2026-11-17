@@ -43,12 +43,12 @@ def test_transition_ds_off_to_ds_ready(state_machine: Level1StateMachine) -> Non
     [
         {"ebs_status": EbsStatus.ACTIVATED},
         {"ebs_status": EbsStatus.UNAVAILABLE},
-        {"dsms_status": False},
+        {"dsms_on": False},
         {"dbs_check_ok": False},
-        {"ts_status": False},
+        {"ts_active": False},
         {"dmi_mission": Mission.NOT_SELECTED},
-        {"brake_status": False},
-        {"sdc_status": False},
+        {"brakes_engaged": False},
+        {"sdc_closed": False},
     ],
 )
 def test_ds_off_stays_in_off_if_any_precondition_missing(
@@ -59,12 +59,12 @@ def test_ds_off_stays_in_off_if_any_precondition_missing(
         "timestamp": 1.0,
         "ebs_status": EbsStatus.ARMED,
         "ebs_sound_active": False,
-        "dsms_status": True,
+        "dsms_on": True,
         "dbs_check_ok": True,
-        "ts_status": True,
+        "ts_active": True,
         "dmi_mission": Mission.INSPECTION,
-        "brake_status": True,
-        "sdc_status": True,
+        "brakes_engaged": True,
+        "sdc_closed": True,
         "res_go_signal": False,
         "velocity": np.zeros(3, dtype=np.float64),
     }
@@ -97,7 +97,7 @@ def test_manual_driving_transition(state_machine: Level1StateMachine) -> None:
     assert status.dssi_status == DSSIStatus.OFF
 
     # When TS turns off, return to DS_Off
-    manual_tel = dataclasses.replace(manual_tel, timestamp=1.02, ts_status=False)
+    manual_tel = dataclasses.replace(manual_tel, timestamp=1.02, ts_active=False)
     status, _ = state_machine.step(manual_tel)
     assert status.current_state == MacroState.DS_OFF
 
@@ -109,7 +109,7 @@ def test_transition_ds_ready_to_ds_off(state_machine: Level1StateMachine) -> Non
     assert status.current_state == MacroState.DS_READY
 
     # Turn DSMS off and release brakes at next cycle
-    tel = dataclasses.replace(tel, timestamp=1.02, dsms_status=False, brake_status=False)
+    tel = dataclasses.replace(tel, timestamp=1.02, dsms_on=False, brakes_engaged=False)
     status, _ = state_machine.step(tel)
     assert status.current_state == MacroState.DS_OFF
     assert status.dssi_status == DSSIStatus.OFF

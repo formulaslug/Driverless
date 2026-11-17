@@ -111,7 +111,7 @@ def test_valid_fresh_res_go_at_five_seconds(state_machine: Level1StateMachine) -
     "patch",
     [
         {"ebs_status": EbsStatus.UNAVAILABLE},
-        {"ts_status": False},
+        {"ts_active": False},
         {"dbs_check_ok": False},
     ],
 )
