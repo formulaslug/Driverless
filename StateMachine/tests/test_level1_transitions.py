@@ -14,7 +14,7 @@ from Pipeline.messages import (
     VcuTelemetryMessage,
 )
 from StateMachine.level1_state_machine import Level1StateMachine
-from StateMachine.tests.conftest import make_ready_telemetry
+from StateMachine.tests.conftest import make_ready_telemetry, planner_step
 
 
 def test_initial_state_is_ds_off(state_machine: Level1StateMachine, base_telemetry: VcuTelemetryMessage) -> None:
@@ -128,22 +128,22 @@ def test_transition_ds_finished_to_ds_off(state_machine: Level1StateMachine) -> 
     """From DS_Finished, turning DSMS off and releasing brakes transitions to DS_Off."""
     # Enter DS_Ready
     t = 1.0
-    state_machine.step(make_ready_telemetry(timestamp=t))
+    planner_step(sm=state_machine, tel=make_ready_telemetry(timestamp=t))
 
     # Advance past 5.0s lockout
     for _ in range(260):
         t += 0.02
-        state_machine.step(make_ready_telemetry(timestamp=t))
+        planner_step(sm=state_machine, tel=make_ready_telemetry(timestamp=t))
 
     # Enter DS_Driving
     t += 0.02
-    state_machine.step(make_ready_telemetry(timestamp=t, res_go=True))
+    planner_step(sm=state_machine, tel=make_ready_telemetry(timestamp=t, res_go=True))
     assert state_machine.current_state == MacroState.DS_DRIVING
 
     # Advance inspection mission until complete and standstill detected
     for _ in range(600):
         t += 0.02
-        status, _ = state_machine.step(make_ready_telemetry(timestamp=t, velocity=0.0))
+        status, _ = planner_step(sm=state_machine, tel=make_ready_telemetry(timestamp=t, velocity=0.0), finished=True)
         if status.current_state == MacroState.DS_FINISHED:
             break
 

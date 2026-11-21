@@ -22,9 +22,11 @@ from Pipeline.messages import (
     Mission,
     StateMachineStatusMessage,
     VcuTelemetryMessage,
+    Level2StatusMessage,
 )
 from StateMachine.constants import STATE_MACHINE_DEFAULT_DT_S
 from StateMachine.level1_state_machine import Level1StateMachine
+from StateMachine.level2.planner_link import PlannerLink
 
 
 class ScenarioFailed(RuntimeError):
@@ -115,7 +117,9 @@ class MockVcuNode(SourceNode):
 def _run_ticks(sm: Level1StateMachine, vcu: MockVcuSimulator, n: int) -> StateMachineStatusMessage:
     status = None
     for _ in range(n):
-        status, _ = sm.step(vcu.step())
+        telemetry_message = vcu.step()
+        sm.receive_planner_message(ActuationCommandMessage(timestamp=telemetry_message.timestamp))
+        status, _ = sm.step(telemetry_message)
     return status
 
 
@@ -140,12 +144,20 @@ def _ready_then_go(sm: Level1StateMachine, vcu: MockVcuSimulator, log: Callable[
 
 def run_normal_mission_scenario(log: Callable[[str], None] = print) -> None:
     """Off -> Ready (5 s timer) -> Driving (inspection) -> Finished -> Off."""
-    sm, vcu = Level1StateMachine(), MockVcuSimulator()
+    sm, vcu = Level1StateMachine(planner_link=PlannerLink()), MockVcuSimulator()
     _ready_then_go(sm, vcu, log)
 
     log("Running the inspection mission until DS_Finished")
-    for _ in range(600):
-        status, _ = sm.step(vcu.step())
+    for tick in range(600):
+        vcu_step = vcu.step()
+        sm.receive_planner_message(ActuationCommandMessage(timestamp=vcu_step.timestamp))
+        sm.receive_planner_message(Level2StatusMessage(
+            timestamp=vcu_step.timestamp,
+            active_substate="DONE" if tick >= 100 else "DRIVING",
+            mission_finished=tick >= 100,
+            emergency_stop=False,
+        ))
+        status, _ = sm.step(vcu_step)
         if status.current_state == MacroState.DS_FINISHED:
             break
     _expect(status.current_state == MacroState.DS_FINISHED, f"expected DS_FINISHED, got {status.current_state.name}")
@@ -161,7 +173,7 @@ def run_normal_mission_scenario(log: Callable[[str], None] = print) -> None:
 
 def run_premature_res_scenario(log: Callable[[str], None] = print) -> None:
     """A RES Go press during the 5 s lockout must not launch the car later."""
-    sm, vcu = Level1StateMachine(), MockVcuSimulator()
+    sm, vcu = Level1StateMachine(planner_link=PlannerLink()), MockVcuSimulator()
     vcu.set_readiness_preconditions()
     _run_ticks(sm, vcu, 101)
 
@@ -185,7 +197,7 @@ def run_premature_res_scenario(log: Callable[[str], None] = print) -> None:
 
 def run_sdc_trip_scenario(log: Callable[[str], None] = print) -> None:
     """SDC opens in DS_Driving -> DS_Emergency, then the flowchart exit back to DS_Off."""
-    sm, vcu = Level1StateMachine(), MockVcuSimulator()
+    sm, vcu = Level1StateMachine(planner_link=PlannerLink()), MockVcuSimulator()
     _ready_then_go(sm, vcu, log)
 
     log("Opening the shutdown circuit")
@@ -212,7 +224,7 @@ def run_sdc_trip_scenario(log: Callable[[str], None] = print) -> None:
 
 def run_watchdog_trip_scenario(log: Callable[[str], None] = print) -> None:
     """A 300 ms telemetry gap in DS_Ready trips the VCU watchdog."""
-    sm, vcu = Level1StateMachine(), MockVcuSimulator()
+    sm, vcu = Level1StateMachine(planner_link=PlannerLink()), MockVcuSimulator()
     vcu.set_readiness_preconditions()
     _run_ticks(sm, vcu, 1)
 
@@ -263,7 +275,7 @@ def _is_on(args) -> bool:
 
 def run_interactive_mode(input_fn=input, output_fn=print) -> None:
     """Interactive prompt for toggling VCU signals and stepping the state machine."""
-    sm, vcu = Level1StateMachine(), MockVcuSimulator()
+    sm, vcu = Level1StateMachine(planner_link=PlannerLink()), MockVcuSimulator()
 
     def show(status: StateMachineStatusMessage, act: ActuationCommandMessage) -> None:
         err = repr(DiagnosticErrorCode(status.error_code)) if status.error_code else "NONE"

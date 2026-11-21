@@ -11,24 +11,22 @@ from Pipeline.messages import (
     EbsStatus,
     Mission,
     DiagnosticErrorCode,
-    ActuationCommandMessage,
 )
 from StateMachine.level1_state_machine import Level1StateMachine
-from StateMachine.level2.base import MissionBehavior, MissionContext, SubStateResult
-from StateMachine.level2.registry import MissionRegistry
-from StateMachine.tests.conftest import drive_to_ds_driving, make_ready_telemetry, make_telemetry
+from StateMachine.level2.planner_link import PlannerLink
+from StateMachine.tests.conftest import DT, drive_to_ds_driving, make_ready_telemetry, make_telemetry, planner_step
 
 
 def test_vcu_watchdog_timeout_trips_emergency(state_machine: Level1StateMachine) -> None:
     """Telemetry gap exceeding 200ms in DS_Ready trips VCU watchdog into DS_Emergency."""
     # Enter DS_Ready at t = 1.0
     tel = make_ready_telemetry(timestamp=1.0)
-    state_machine.step(tel)
+    planner_step(sm=state_machine, tel=tel)
     assert state_machine.current_state == MacroState.DS_READY
 
     # Next packet arrives at t = 1.3s (300ms gap > 200ms timeout)
     tel = dataclasses.replace(tel, timestamp=1.3)
-    status, act = state_machine.step(tel)
+    status, act = planner_step(sm=state_machine, tel=tel)
 
     assert status.current_state == MacroState.DS_EMERGENCY
     assert status.dssi_status == DSSIStatus.CONTINUOUS_BLUE
@@ -90,88 +88,32 @@ def test_dsms_drop_in_driving_trips_emergency(state_machine: Level1StateMachine)
     assert status.error_code & DiagnosticErrorCode.DSMS_UNEXPECTED_DROP
 
 
-class CrashingMission(MissionBehavior):
-    """Test mission that raises an unhandled exception."""
-    @property
-    def name(self) -> str:
-        return "Crashing Mission"
+def test_level2_failure_latches_emergency(state_machine: Level1StateMachine) -> None:
+    """A planner that crashes (goes silent) trips DS_Emergency, and recovering does not clear it."""
+    t = drive_to_ds_driving(state_machine, Mission.SKIDPAD)
 
-    def on_enter(self, context: MissionContext) -> None:
-        pass
+    # Healthy planner: commands pass through.
+    for _ in range(5):
+        t += DT
+        status, act = planner_step(state_machine, make_ready_telemetry(timestamp=t, mission=Mission.SKIDPAD))
+        assert status.current_state == MacroState.DS_DRIVING
+        assert act.gated is True
 
-    def update(self, context: MissionContext) -> SubStateResult:
-        raise RuntimeError("Simulated unhandled controls fault")
-
-    def on_exit(self, context: MissionContext, interrupted: bool = False) -> None:
-        pass
-
-
-def test_level2_exception_latches_emergency(state_machine: Level1StateMachine) -> None:
-    """Unhandled exception in Level 2 update is safely caught and trips DS_Emergency."""
-    # Register crashing mission for Skidpad
-    MissionRegistry.register(Mission.SKIDPAD, CrashingMission)
-
-    t = 1.0
-    state_machine.step(make_ready_telemetry(timestamp=t, mission=Mission.SKIDPAD))
-
-    for _ in range(260):
-        t += 0.02
-        state_machine.step(make_ready_telemetry(timestamp=t, mission=Mission.SKIDPAD))
-
-    # Launch driving with crashing mission (transitions to DS_DRIVING)
-    t += 0.02
-    status, act = state_machine.step(make_ready_telemetry(timestamp=t, res_go=True, mission=Mission.SKIDPAD))
-    assert status.current_state == MacroState.DS_DRIVING
-
-    # Next driving tick calls Level 2 update(), which raises exception and trips DS_Emergency
-    t += 0.02
-    status, act = state_machine.step(make_ready_telemetry(timestamp=t, mission=Mission.SKIDPAD))
+    # Planner crashes: no messages for longer than LEVEL2_WATCHDOG_TIMEOUT_S.
+    for _ in range(12):  # 12 * 20 ms = 240 ms > 200 ms
+        t += DT
+        status, act = state_machine.step(make_ready_telemetry(timestamp=t, mission=Mission.SKIDPAD))
     assert status.current_state == MacroState.DS_EMERGENCY
-    assert status.error_code & DiagnosticErrorCode.LEVEL2_EXCEPTION
+    assert status.error_code & DiagnosticErrorCode.WATCHDOG_TIMEOUT_LEVEL2
     assert act.gated is False
 
-
-def test_injected_mission_behavior() -> None:
-    """Verifies that a custom injected MissionBehavior overrides the default registry."""
-    class InjectedMission(MissionBehavior):
-        def __init__(self) -> None:
-            self.entered: bool = False
-            self.updated: bool = False
-
-        @property
-        def name(self) -> str:
-            return "Injected Test Mission"
-
-        def on_enter(self, context: MissionContext) -> None:
-            self.entered = True
-
-        def update(self, context: MissionContext) -> SubStateResult:
-            self.updated = True
-            return SubStateResult(next_substate="CUSTOM_SUBSTATE")
-
-        def on_exit(self, context: MissionContext, interrupted: bool = False) -> None:
-            pass
-
-    custom_mission = InjectedMission()
-    sm = Level1StateMachine(mission_behavior=custom_mission)
-
-    t = 1.0
-    sm.step(make_ready_telemetry(timestamp=t))
-
-    for _ in range(260):
-        t += 0.02
-        sm.step(make_ready_telemetry(timestamp=t))
-
-    t += 0.02
-    status, _ = sm.step(make_ready_telemetry(timestamp=t, res_go=True))
-    assert status.current_state == MacroState.DS_DRIVING
-    assert custom_mission.entered is True
-
-    t += 0.02
-    status, _ = sm.step(make_ready_telemetry(timestamp=t))
-    assert custom_mission.updated is True
-    assert status.active_substate == "CUSTOM_SUBSTATE"
-
+    # Planner restarts and sends fresh, healthy messages: the emergency must hold.
+    for _ in range(50):
+        t += DT
+        status, act = planner_step(state_machine, make_ready_telemetry(timestamp=t, mission=Mission.SKIDPAD))
+        assert status.current_state == MacroState.DS_EMERGENCY
+        assert status.error_code & DiagnosticErrorCode.WATCHDOG_TIMEOUT_LEVEL2
+        assert act.gated is False
 
 @pytest.mark.parametrize(
     "blocking",
@@ -187,7 +129,7 @@ def test_emergency_holds_until_every_exit_condition(state_machine: Level1StateMa
     state_machine.request_emergency_trip(DiagnosticErrorCode.SDC_OPEN, timestamp=1.02)
 
     for i in range(50):
-        status, _ = state_machine.step(make_telemetry(timestamp=1.04 + i * 0.02, **blocking))
+        status, _ = planner_step(state_machine, make_telemetry(timestamp=1.04 + i * 0.02, **blocking))
         assert status.current_state == MacroState.DS_EMERGENCY
     assert status.error_code & DiagnosticErrorCode.SDC_OPEN
 
@@ -208,28 +150,27 @@ def test_emergency_exits_to_off_per_flowchart(state_machine: Level1StateMachine)
     assert status.ebs_trigger_cmd is False
 
 
-def test_level2_external_planner_watchdog_timeout() -> None:
+def test_level2_planner_watchdog_timeout() -> None:
     """When relying on external controls in DS_Driving, missing commands for > 200ms trip watchdog."""
-    sm = Level1StateMachine()  # No injected mission, Mission.TRACKDRIVE has no registered behavior
+    sm = Level1StateMachine(planner_link=PlannerLink())  # No injected mission, Mission.TRACKDRIVE has no registered behavior
     t = 1.0
-    sm.step(make_ready_telemetry(timestamp=t, mission=Mission.TRACKDRIVE))
+    planner_step(sm=sm, tel=make_ready_telemetry(timestamp=t, mission=Mission.TRACKDRIVE))
 
     for _ in range(260):
         t += 0.02
-        sm.step(make_ready_telemetry(timestamp=t, mission=Mission.TRACKDRIVE))
+        planner_step(sm=sm, tel=make_ready_telemetry(timestamp=t, mission=Mission.TRACKDRIVE))
 
     # Launch driving
     t += 0.02
-    cmd = ActuationCommandMessage(timestamp=t, steering=np.zeros(1), throttle=np.array([0.2]))
-    status, _ = sm.step(make_ready_telemetry(timestamp=t, res_go=True, mission=Mission.TRACKDRIVE), external_actuation=cmd)
+    status, _ = planner_step(sm=sm, tel=make_ready_telemetry(timestamp=t, res_go=True, mission=Mission.TRACKDRIVE))
     assert status.current_state == MacroState.DS_DRIVING
 
     # Telemetry streams at 50Hz, but external planner sends stale commands (> 200ms old)
     for _ in range(12):  # 12 * 0.02s = 240ms > 200ms timeout
         t += 0.02
+
         status, act = sm.step(
-            make_ready_telemetry(timestamp=t, mission=Mission.TRACKDRIVE),
-            external_actuation=cmd,  # Stale timestamp
+            make_ready_telemetry(timestamp=t, mission=Mission.TRACKDRIVE)  # Status and Actuation Commands left stale
         )
 
     assert status.current_state == MacroState.DS_EMERGENCY
@@ -248,7 +189,7 @@ def test_level2_external_planner_watchdog_timeout() -> None:
 )
 def test_driving_hardware_fault_trips_emergency(fault_patch: dict, expected_fault: DiagnosticErrorCode) -> None:
     """DS_Driving -> DS_Emergency on EBS activation (flowchart.png) and the hardware safety extensions."""
-    sm = Level1StateMachine()
+    sm = Level1StateMachine(planner_link=PlannerLink())
     t = drive_to_ds_driving(sm)
     status, act = sm.step(make_ready_telemetry(timestamp=t + 0.02, **fault_patch))
     assert status.current_state == MacroState.DS_EMERGENCY
@@ -256,27 +197,9 @@ def test_driving_hardware_fault_trips_emergency(fault_patch: dict, expected_faul
     assert status.ebs_trigger_cmd is True
     assert act.gated is False and np.allclose(act.throttle, 0.0)
 
-
-def test_level2_on_enter_exception_trips_emergency() -> None:
-    """A mission that crashes while starting must not leave the car in DS_Driving."""
-    class BrokenStart(CrashingMission):
-        def on_enter(self, context: MissionContext) -> None:
-            raise RuntimeError("bad calibration file")
-
-    sm = Level1StateMachine(mission_behavior=BrokenStart())
-    t = 1.0
-    sm.step(make_ready_telemetry(timestamp=t))
-    for _ in range(260):
-        t += 0.02
-        sm.step(make_ready_telemetry(timestamp=t))
-    status, _ = sm.step(make_ready_telemetry(timestamp=t + 0.02, res_go=True))
-    assert status.current_state == MacroState.DS_EMERGENCY
-    assert status.error_code == DiagnosticErrorCode.LEVEL2_EXCEPTION
-
-
 def test_emergency_is_published_before_it_can_clear() -> None:
     """A trip must reach the VCU at least once, even if the late packet already meets the exit conditions."""
-    sm = Level1StateMachine()
+    sm = Level1StateMachine(planner_link=PlannerLink())
     t = drive_to_ds_driving(sm)
     late_packet = make_telemetry(timestamp=t + 0.3)  # DSMS off, brakes released, sound off
     status, act = sm.step(late_packet)

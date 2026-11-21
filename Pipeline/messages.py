@@ -55,7 +55,7 @@ class DiagnosticErrorCode(IntFlag):
     EBS_ACTIVATED_UNEXPECTED = 1 << 1
     WATCHDOG_TIMEOUT_VCU     = 1 << 2
     WATCHDOG_TIMEOUT_LEVEL2  = 1 << 3
-    LEVEL2_EXCEPTION         = 1 << 4
+    LEVEL2_EXCEPTION         = 1 << 4  # reserved: was in-process mission exception; do not reuse.
     LEVEL2_EMERGENCY_STOP    = 1 << 5
     TS_INACTIVE              = 1 << 6
     DSMS_UNEXPECTED_DROP     = 1 << 7

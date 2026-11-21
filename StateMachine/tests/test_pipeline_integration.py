@@ -16,6 +16,8 @@ from Pipeline.messages import (
     StateMachineStatusMessage,
 )
 from StateMachine.state_machine_node import StateMachineNode
+from StateMachine.level1_state_machine import Level1StateMachine
+from StateMachine.level2.planner_link import PlannerLink
 from StateMachine.mock_vcu import MockVcuNode, MockVcuSimulator
 from StateMachine.tests.conftest import DT, make_ready_telemetry, make_telemetry
 
@@ -42,7 +44,8 @@ def test_statemachine_node_in_pipeline_graph() -> None:
     sim.set_readiness_preconditions()
 
     vcu_node = MockVcuNode(name="mock_vcu", simulator=sim, tick_rate_hz=100.0, max_ticks=10)
-    sm_node = StateMachineNode(name="state_machine")
+    sm = Level1StateMachine(planner_link=PlannerLink())
+    sm_node = StateMachineNode(name="state_machine", state_machine=sm)
     sink = TelemetrySinkNode(name="sink")
 
     vcu_node.subscribe(sm_node)
@@ -78,7 +81,8 @@ class FakeClock:
 def test_link_loss_trips_emergency_without_new_packets() -> None:
     """The VCU watchdog fires while the link is still dead, not only when a late packet arrives."""
     clock = FakeClock()
-    node = StateMachineNode(clock=clock)
+    sm = Level1StateMachine(planner_link=PlannerLink())
+    node = StateMachineNode(clock=clock, state_machine=sm)
     node.process(make_ready_telemetry(timestamp=1.0))
     assert node.state_machine.current_state == MacroState.DS_READY
 
@@ -98,7 +102,8 @@ def test_link_loss_trips_emergency_without_new_packets() -> None:
 
 def test_link_loss_is_ignored_in_ds_off() -> None:
     clock = FakeClock()
-    node = StateMachineNode(clock=clock)
+    sm = Level1StateMachine(planner_link=PlannerLink())
+    node = StateMachineNode(clock=clock, state_machine=sm)
     node.process(make_telemetry(timestamp=1.0))
     clock.now += 5.0
     assert node.check_link() is None
@@ -107,7 +112,8 @@ def test_link_loss_is_ignored_in_ds_off() -> None:
 
 def test_watchdog_thread_publishes_emergency() -> None:
     """End to end with real threads: one packet, then silence, then an emergency is published."""
-    node = StateMachineNode()
+    sm = Level1StateMachine(planner_link=PlannerLink())
+    node = StateMachineNode(state_machine=sm)
     out: queue.Queue = queue.Queue()
     node.subscribers.append(out)
     node.start()
@@ -131,7 +137,8 @@ def test_watchdog_thread_publishes_emergency() -> None:
 
 def test_node_forwards_planner_messages_to_state_machine() -> None:
     """Cached planner commands and status reach the state machine, so external missions can finish."""
-    node = StateMachineNode()
+    sm = Level1StateMachine(planner_link=PlannerLink())
+    node = StateMachineNode(state_machine=sm)
     t = 1.0
     node.process(make_ready_telemetry(timestamp=t, mission=Mission.ACCELERATION))
     for _ in range(261):
@@ -216,7 +223,8 @@ def test_mock_vcu_scenarios_pass() -> None:
 def test_step_that_keeps_raising_still_trips_link_watchdog() -> None:
     """A packet whose step() raises does not count as a live link."""
     clock = FakeClock()
-    node = StateMachineNode(clock=clock)
+    sm = Level1StateMachine(planner_link=PlannerLink())
+    node = StateMachineNode(clock=clock, state_machine=sm)
     node.process(make_ready_telemetry(timestamp=1.0))
 
     def broken_step(*args, **kwargs):

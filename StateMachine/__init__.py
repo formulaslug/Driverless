@@ -19,13 +19,8 @@ from StateMachine.level1_state_machine import (
     unpack_diagnostic_flags,
     VALID_DRIVERLESS_MISSIONS,
 )
-from StateMachine.level2 import (
-    MissionBehavior,
-    MissionContext,
-    SubStateResult,
-    MissionRegistry,
-    InspectionMission,
-)
+from StateMachine.level2.base import SubStateResult
+from StateMachine.level2.planner_link import PlannerLink
 
 __all__ = [
     "DSSIStatus",
@@ -46,9 +41,6 @@ __all__ = [
     "Level1StateMachine",
     "unpack_diagnostic_flags",
     "VALID_DRIVERLESS_MISSIONS",
-    "MissionBehavior",
-    "MissionContext",
     "SubStateResult",
-    "MissionRegistry",
-    "InspectionMission",
+    "PlannerLink"
 ]

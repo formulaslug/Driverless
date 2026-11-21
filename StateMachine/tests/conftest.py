@@ -1,32 +1,29 @@
 """Shared fixtures and helper factories for State Machine unit tests."""
 
 import dataclasses
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 import numpy as np
 import pytest
 
-from Pipeline.messages import ActuationCommandMessage, EbsStatus, MacroState, Mission, VcuTelemetryMessage
+from Pipeline.messages import (
+    ActuationCommandMessage,                           
+    EbsStatus, 
+    MacroState, 
+    Mission, 
+    VcuTelemetryMessage, 
+    Level2StatusMessage
+    )
 from StateMachine.constants import STATE_MACHINE_DEFAULT_DT_S
 from StateMachine.level1_state_machine import Level1StateMachine
-from StateMachine.level2.registry import MissionRegistry
+from StateMachine.level2.planner_link import PlannerLink
 
 DT = STATE_MACHINE_DEFAULT_DT_S
-
-
-@pytest.fixture(autouse=True)
-def _isolate_mission_registry():
-    """Undo any MissionRegistry.register() a test makes, so tests cannot leak missions."""
-    saved = dict(MissionRegistry._registry)
-    yield
-    MissionRegistry._registry.clear()
-    MissionRegistry._registry.update(saved)
-
 
 @pytest.fixture
 def state_machine() -> Level1StateMachine:
     """Fixture providing a fresh Level 1 state machine instance."""
-    return Level1StateMachine()
+    return Level1StateMachine(planner_link=PlannerLink())
 
 
 def make_telemetry(timestamp: float = 0.0, velocity: float = 0.0, **overrides) -> VcuTelemetryMessage:
@@ -76,8 +73,7 @@ def make_ready_telemetry(
 def drive_to_ds_driving(
     sm: Level1StateMachine,
     mission: Mission = Mission.INSPECTION,
-    start: float = 1.0,
-    command: Optional[ActuationCommandMessage] = None,
+    start: float = 1.0
 ) -> float:
     """Walk ``sm`` through DS_Ready and the 5 s lockout into DS_Driving. Returns the last timestamp."""
     t = start
@@ -86,19 +82,54 @@ def drive_to_ds_driving(
         t += DT
         sm.step(make_ready_telemetry(timestamp=t, mission=mission))
     t += DT
-    if command is not None:
-        command = dataclasses.replace(command, timestamp=t)
-    sm.step(make_ready_telemetry(timestamp=t, res_go=True, mission=mission), external_actuation=command)
+    sm.step(make_ready_telemetry(timestamp=t, res_go=True, mission=mission))
     assert sm.current_state == MacroState.DS_DRIVING
     return t
 
+def planner_step(sm: Level1StateMachine, tel, finished=False, estop=False, substate="DRIVING"):
+    """One tick with a fake planner"""
+    sm.receive_planner_message(ActuationCommandMessage(timestamp=tel.timestamp))
+    sm.receive_planner_message(Level2StatusMessage(timestamp=tel.timestamp,
+                                                   active_substate=substate,
+                                                   mission_finished=finished,
+                                                   emergency_stop=estop))
+    return sm.step(tel)
 
-def step_until(sm, make_tel, start: float, state: MacroState, max_steps: int = 1000) -> Tuple[float, object]:
-    """Step with ``make_tel(t)`` until ``sm`` reaches ``state``. Returns (t, last status)."""
+PlannerFn = Callable[[float], Optional[dict]]
+
+
+def step_until(
+    sm: Level1StateMachine,
+    make_tel: Callable[[float], VcuTelemetryMessage],
+    start: float,
+    state: MacroState,
+    max_steps: int = 1000,
+    planner: Optional[PlannerFn] = None,
+) -> Tuple[float, object]:
+    """Steps ``sm`` until it reaches ``state``.
+
+    Args:
+        sm: State machine to drive.
+        make_tel: Builds the telemetry packet for time t.
+        start: Timestamp before the first step; each step advances by DT.
+        state: MacroState to stop at.
+        max_steps: Upper bound on steps taken.
+        planner: Called with t each tick. Return planner_step kwargs to send
+            a fresh command and status that tick, or None to stay silent.
+            Omit for phases with no planner (DS_OFF, DS_READY).
+
+    Returns:
+        A (last timestamp, last status) pair.
+    """
     t, status = start, None
     for _ in range(max_steps):
         t += DT
-        status, _ = sm.step(make_tel(t))
+        tel = make_tel(t)
+        planner_kwargs = planner(t) if planner is not None else None
+        if planner_kwargs is None:
+            status, _ = sm.step(tel)
+        else:
+            status, _ = planner_step(sm, tel, **planner_kwargs)
         if status.current_state == state:
             break
     return t, status
