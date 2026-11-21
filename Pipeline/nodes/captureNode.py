@@ -1,11 +1,7 @@
-import os
-import sys
+import Pipeline.pipelinePaths  # noqa: F401  adds sibling perception dirs to sys.path
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import pipelinePaths  # noqa: F401  adds sibling perception dirs to sys.path
-
-from node import SourceNode
-from messages import FrameMessage
+from Pipeline.node import SourceNode
+from Pipeline.messages import FrameMessage
 
 # Streams frames from a VideoSource or CameraSource and emits FrameMessage
 # carrying the shared CameraModel so every downstream stage uses one camera.

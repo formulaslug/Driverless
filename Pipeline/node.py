@@ -3,7 +3,7 @@ import threading
 import queue
 import traceback
 
-from messages import FailedFrameMessage
+from Pipeline.messages import FailedFrameMessage
 
 # Sentinel pushed downstream on end-of-stream so worker threads exit cleanly.
 POISON = object()

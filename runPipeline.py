@@ -1,27 +1,21 @@
 import os
 os.environ.setdefault('PYTORCH_ENABLE_MPS_FALLBACK', '1')
 
-import sys
 import argparse
 
-sys.path.append(os.path.join(os.path.dirname(__file__), 'Pipeline'))
-sys.path.append(os.path.join(os.path.dirname(__file__), 'Pipeline', 'nodes'))
-sys.path.append(os.path.join(os.path.dirname(__file__), 'Pipeline', 'backends'))
-sys.path.append(os.path.join(os.path.dirname(__file__), 'Pipeline', 'motion'))
-
-import pipelinePaths  # noqa: F401  adds sibling perception dirs to sys.path
-from graph import Graph
+import Pipeline.pipelinePaths  # noqa: F401  adds sibling perception dirs to sys.path
+from Pipeline.graph import Graph
 from cameraModel import CameraModel
-from videoSource import VideoSource, CameraSource
-from captureNode import CaptureNode
-from segmentationNode import SegmentationNode
-from distanceNode import DistanceNode
-from motionNode import MotionNode
-from localizationNode import LocalizationNode
-from planningNode import PlanningNode
-from videoWriterNode import VideoWriterNode
-from segmentationBackends import createSegmentationBackend
-from motionEstimator import createMotionEstimator
+from Pipeline.videoSource import VideoSource, CameraSource
+from Pipeline.nodes.captureNode import CaptureNode
+from Pipeline.nodes.segmentationNode import SegmentationNode
+from Pipeline.nodes.distanceNode import DistanceNode
+from Pipeline.nodes.motionNode import MotionNode
+from Pipeline.nodes.localizationNode import LocalizationNode
+from Pipeline.nodes.planningNode import PlanningNode
+from Pipeline.nodes.videoWriterNode import VideoWriterNode
+from Pipeline.backends.segmentationBackends import createSegmentationBackend
+from Pipeline.motion.motionEstimator import createMotionEstimator
 
 
 def openSource(args):

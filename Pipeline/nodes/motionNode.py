@@ -1,12 +1,7 @@
-import os
-import sys
+import Pipeline.pipelinePaths  # noqa: F401
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'motion'))
-import pipelinePaths  # noqa: F401
-
-from node import Node
-from messages import FrameMessage, OdometryMessage
+from Pipeline.node import Node
+from Pipeline.messages import FrameMessage, OdometryMessage
 
 # Emits one OdometryMessage(dx, dy, dyaw) per frame from the motion estimator.
 # Frames arrive in order from the single capture upstream, so the estimator

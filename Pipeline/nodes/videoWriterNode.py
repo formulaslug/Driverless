@@ -1,14 +1,12 @@
 import os
-import sys
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import pipelinePaths  # noqa: F401
+import Pipeline.pipelinePaths  # noqa: F401
 
 import cv2
 import numpy as np
-from node import Node
-from messages import FrameMessage, SegmentationMessage, ConeDistancesMessage, PathMessage, ConeMapMessage
-from synchronizer import FrameSynchronizer, ReorderBuffer
+from Pipeline.node import Node
+from Pipeline.messages import FrameMessage, SegmentationMessage, ConeDistancesMessage, PathMessage, ConeMapMessage
+from Pipeline.synchronizer import FrameSynchronizer, ReorderBuffer
 
 # BGR colors per cone class for overlays.
 _CLASS_COLORS = {

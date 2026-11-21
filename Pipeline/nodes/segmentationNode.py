@@ -1,11 +1,7 @@
-import os
-import sys
+import Pipeline.pipelinePaths  # noqa: F401
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import pipelinePaths  # noqa: F401
-
-from node import Node
-from messages import SegmentationMessage
+from Pipeline.node import Node
+from Pipeline.messages import SegmentationMessage
 
 # Runs a pluggable segmentation backend (YOLO on Mac, YOLACT-Edge on Jetson).
 # The backend returns the shared segmentation dict contract.
