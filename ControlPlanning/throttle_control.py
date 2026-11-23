@@ -1,4 +1,4 @@
-from config import R_WHEEL, T_GEARBOX, M, MAX_TORQUE
+from control_config import R_WHEEL, T_GEARBOX, M, MAX_TORQUE
 import numpy as np
 
 class ThrottleControl():

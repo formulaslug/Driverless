@@ -92,6 +92,6 @@ def plot_open():
     print(f"Peak accel: {a[10:-10].max():.2f} m/s^2")
     plt.figure(); plt.plot(v, a)
     plt.xlabel("Speed (m/s)"); plt.ylabel("Accel (m/s^2)"); plt.grid()
-
-run_tune()
-plt.show()
+if __name__ == "__main__":
+    run_tune() 
+    plt.show()

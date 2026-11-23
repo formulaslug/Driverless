@@ -4,11 +4,10 @@ import sys
 ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR))
 
-import matplotlib
-import matplotlib.pyplot as plt
 import numpy as np
+import pytest
 
-from config import M, MAX_TORQUE, R_WHEEL, STEERING_RATIO, T_GEARBOX, WHEELBASE
+from control_config import M, MAX_STEERING_ANGLE, MAX_TORQUE, R_WHEEL, STEERING_RATIO, T_GEARBOX, WHEELBASE
 from controller import Controller
 from longitudinal.gain_scheduler import Gains
 
@@ -78,6 +77,7 @@ def run_sim(waypoints):
     x_hist, y_hist, v_hist, t_hist, delta_hist = [x], [y], [v], [t], [0.0]
 
     goal_x, goal_y = waypoints[-1]
+    reached = False
 
     while t < MAX_TIME:
         throttle, steering_angle = controller.update(
@@ -96,18 +96,18 @@ def run_sim(waypoints):
         delta_hist.append(delta)
 
         if np.hypot(goal_x - x, goal_y - y) < GOAL_TOLERANCE:
-            print(f"Reached goal at t={t:.2f}s")
+            reached = True
             break
-    else:
-        print(f"Hit MAX_TIME ({MAX_TIME}s) without reaching goal")
 
     return {
         "x": x_hist, "y": y_hist, "v": v_hist, "t": t_hist, "delta": delta_hist,
-        "waypoints": waypoints,
+        "waypoints": waypoints, "reached": reached,
     }
 
 
 def plot_results(result):
+    import matplotlib.pyplot as plt
+
     wp_x = [p[0] for p in result["waypoints"]]
     wp_y = [p[1] for p in result["waypoints"]]
 
@@ -141,10 +141,62 @@ def plot_results(result):
     axes[2].grid(True)
 
     plt.tight_layout()
-    if matplotlib.get_backend().lower() == "agg":
-        plt.close(fig)
-    else:
-        plt.show()
+    plt.show()
+
+# Metrics
+
+def cross_track_errors(result):
+    """Distance from each car position to the nearest point on the (densified) path."""
+    wp = np.asarray(result["waypoints"], dtype=float)
+    dense = np.vstack(
+        [np.linspace(a, b, 20, endpoint=False) for a, b in zip(wp[:-1], wp[1:])] + [wp[-1:]]
+    )
+    car = np.column_stack([result["x"], result["y"]])
+    return np.min(np.linalg.norm(car[:, None, :] - dense[None, :, :], axis=2), axis=1)
+
+
+def settled_cross_track_error(result):
+    """Worst cross-track error over the second half of the run (after the initial
+    2 m offset has been corrected)."""
+    cte = cross_track_errors(result)
+    return cte[len(cte) // 2:].max()
+
+
+# Tests
+
+FEASIBLE_PATHS = {
+    "straight": make_straight_curve,
+    "s_curve": make_s_curve,
+}
+
+
+@pytest.mark.parametrize("name", FEASIBLE_PATHS)
+def test_converges_onto_path_and_reaches_goal(name):
+    result = run_sim(FEASIBLE_PATHS[name]())
+
+    assert result["reached"], f"{name}: never reached the final waypoint"
+    assert settled_cross_track_error(result) < 0.25, f"{name}: never converged back onto the path"
+    assert np.abs(result["delta"]).max() <= MAX_STEERING_ANGLE + 1e-9
+
+
+def test_speed_settles_at_target_on_s_curve():
+    result = run_sim(make_s_curve())
+    v = np.asarray(result["v"])
+
+    assert abs(v[-1] - V_DESIRED) < 0.1, f"final speed {v[-1]:.2f} m/s"
+    assert v.max() < 1.25 * V_DESIRED, f"overshoot to {v.max():.2f} m/s"
+
+
+def test_infeasible_tight_curve_stays_stable():
+    # The tight curve's radius (~0.7 m) is smaller than the car's minimum turning
+    # radius (~3.4 m), so it can't be tracked. Steering should saturate at the
+    # limit and the sim should stay finite instead of blowing up.
+    result = run_sim(make_tight_curve())
+
+    for key in ("x", "y", "v", "delta"):
+        assert np.all(np.isfinite(result[key])), f"{key} went non-finite"
+    assert np.abs(result["delta"]).max() <= MAX_STEERING_ANGLE + 1e-9
+    assert max(result["v"]) < 1.25 * V_DESIRED
 
 
 if __name__ == "__main__":
@@ -153,4 +205,5 @@ if __name__ == "__main__":
     waypoints = make_s_curve()
 
     result = run_sim(waypoints)
+    print("Reached goal" if result["reached"] else f"Hit MAX_TIME ({MAX_TIME}s) without reaching goal")
     plot_results(result)

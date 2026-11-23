@@ -16,16 +16,12 @@ class GainScheduler:
         self.rate : Gains = None
         self.t_ramp_end : float = None
 
-        self.PROFILES = {
-            0: Gains(2.5, 0.6, 0.05),
-        }
+        # Stored in tuple(min desired velocity, gains, ramp time)
+        # Append new profiles, indexed by order of list
+        self.PROFILES = [
+            (0.0, initial_gains, 2.0)
+        ]
 
-        self.RAMP_TIMES = {
-            0: 5.0,
-            1: 4.0,
-            2: 3.0,
-            3: 2.0
-        }
 
     def start_gain_change(self, target: Gains, t: float, time_to_change: float):
             """
@@ -77,23 +73,29 @@ class GainScheduler:
 
         self.t_prev = t
 
-    def gain_schedule(self, sm_in: int, t: float):
+
+    def gain_schedule(self, v_desired: float, t: float):
         """
         Automated Gain Scheduling. 
-        Changes our Gain Constants based state machine input.
+        Changes our Gain Constants based on desired velocity.
 
-        Input: sm_in = state machine input
-               t = current time
+        Input: v_desired = desired velocity (m/s)
+               t = current time (s)
         """
-        if sm_in in self.PROFILES:
-            desired_profile = self.PROFILES[sm_in]
-            ramp_time = self.RAMP_TIMES[sm_in]
+        # Set initial gains
+        min_des_v, desired_profile, ramp_time = self.PROFILES[0]
+        
+        # Iterate through to check which gains should be active
+        for min_des_v, gains, ramp in self.PROFILES:
+            if v_desired >= min_des_v:
+                desired_profile, ramp_time = gains, ramp
 
-            # Only start a new ramp if we aren't already targeting it AND aren't already at it
-            if self.target != desired_profile and self.gains != desired_profile:
-                self.start_gain_change(desired_profile, t, ramp_time)
+    
+        # Only start a new ramp if we aren't already targeting it AND aren't already at it
+        if self.target != desired_profile and self.gains != desired_profile:
+            self.start_gain_change(desired_profile, t, ramp_time)
             
-            self.change_gains(t)
+        self.change_gains(t)
 
     def print_gains(self):
         print(f"KP: {self.gains.KP}\nKI: {self.gains.KI}\nKD: {self.gains.KD}\n")

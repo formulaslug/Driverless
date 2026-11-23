@@ -1,7 +1,6 @@
-from dataclasses import dataclass
 import numpy as np
 from longitudinal.gain_scheduler import Gains, GainScheduler
-from config import MAX_ACCEL, MIN_ACCEL
+from control_config import MAX_ACCEL, MIN_ACCEL
 
 class PID:
 
@@ -60,7 +59,7 @@ class PID:
         else:
             self.settle_time = None
 
-    def update_des_accel(self, v, v_desired, t, sm_in=None):
+    def update_des_accel(self, v, v_desired, t):
         """
         PID longitudinal algorithm, updating state variables, and desired accel
         """
@@ -76,8 +75,7 @@ class PID:
             dt = t - self.t_prev
 
         # Update gains via GainScheduler before computing PID
-        if sm_in is not None:
-            self.gains.gain_schedule(sm_in, t=t)
+        self.gains.gain_schedule(v_desired, t=t)
 
         P = error * self.gains.gains.KP
         D = -(v - self.v_prev) / dt * self.gains.gains.KD # prevent deritive kick

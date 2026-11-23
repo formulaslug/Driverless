@@ -42,7 +42,7 @@ throttle, steering_wheel_deg = controller.update(x, y, yaw, v, t, v_desired, way
 | `longitudinal/longitudinal.py` | Holds longitduinal controller(PID)|
 | `throttle_control.py` | converts acceleration to throttle percent |
 | `steering_control.py` | converts delta to steering wheel angle |
-| `config.py` | All vehicle and limit constants |
+| `control_config.py` | All vehicle and limit constants |
 | `tune.py` | Tunes the pid controller using  the Full Vehicle Sim |
 | `testing/` | Tests |
 

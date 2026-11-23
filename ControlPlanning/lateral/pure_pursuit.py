@@ -1,10 +1,11 @@
 import numpy as np
 
 class PurePursuit():
-    def __init__(self, K_dd, min_lookahead, wheelbase):
+    def __init__(self, K_dd, min_lookahead, wheelbase, max_steer):
         self.K_dd = K_dd
         self.min_lookahead = min_lookahead
         self.wheelbase = wheelbase
+        self.max_steer = max_steer # radians, physical limit of the front wheels
 
 
 
@@ -59,5 +60,8 @@ class PurePursuit():
         k = self.get_curve(alpha=alpha, l_d=l_d)
 
         delta = np.arctan(k * self.wheelbase)
+
+        # never command more than the wheels can physically turn
+        delta = float(np.clip(delta, -self.max_steer, self.max_steer))
 
         return delta
