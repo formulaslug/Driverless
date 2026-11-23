@@ -1,8 +1,3 @@
-"""
-Drives the full Controller around simple tracks with a kinematic bicycle model.
-This is the "does the whole thing actually work" test: catches sign errors,
-degree/radian mixups and an unstable PID.
-"""
 import numpy as np
 import pytest
 
@@ -43,7 +38,7 @@ def simulate(waypoints, v_desired, x0=0.0, y0=0.0, yaw0=0.0, v0=0.0):
 
 
 def cross_track_errors(hist, waypoints):
-    """Distance from each car position to the nearest point on the (densified) path."""
+    """Distance from each car position to the nearest point on the path."""
     wp = np.asarray(waypoints)
     dense = np.vstack([np.linspace(a, b, 20, endpoint=False) for a, b in zip(wp[:-1], wp[1:])] + [wp[-1:]])
     car = np.column_stack([hist["x"], hist["y"]])

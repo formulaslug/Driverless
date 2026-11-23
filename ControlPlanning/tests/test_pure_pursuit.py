@@ -11,7 +11,6 @@ def rotate(path, angle):
     c, s = np.cos(angle), np.sin(angle)
     return np.asarray(path) @ np.array([[c, s], [-s, c]])
 
-
 @pytest.fixture
 def pp():
     return PurePursuit(K_dd=K_DD, min_lookahead=MIN_LOOKAHEAD, wheelbase=WHEELBASE,

@@ -39,14 +39,19 @@ throttle, steering_wheel_deg = controller.update(x, y, yaw, v, t, v_desired, way
 | `lateral/pure_pursuit` | Pure Pursuit algorithm to get delta |
 | `longitudinal/pid.py` | PID controller to get desired acceleration |
 | `longitudinal/gain_scheduler.py` | Holds the gain profiles and ramps linearly between them |
-| `longitudinal/longitudinal.py` | Holds longitduinal controller(PID)|
+| `longitudinal/longitudinal.py` | Holds longitudinal controller(PID)|
 | `throttle_control.py` | converts acceleration to throttle percent |
 | `steering_control.py` | converts delta to steering wheel angle |
 | `control_config.py` | All vehicle and limit constants |
 | `tune.py` | Tunes the pid controller using  the Full Vehicle Sim |
-| `testing/` | Tests |
+| `tests/` | Tests + full demo|
 
 ## Requirements
 - numpy
 - matplotlib
-- SimsData FullVehichleSim libraries (only for tuning)
+- SimsData FullVehicleSim libraries (only for tuning)
+
+## Testing
+Run from `ControlPlanning/`:
+- `pytest`: unit and closed-loop tests
+- `python -m tests.closed_loop_demo`: runs full controller using a mock path plannner for inputs and bicycle model for state update
